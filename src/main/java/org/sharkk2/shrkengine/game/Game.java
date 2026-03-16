@@ -33,7 +33,7 @@ public class Game extends Engine {
 
     @Override
     protected void onInit() {
-        initializeUI("fonts/minecraft.ttf");
+        initializeUI("fonts/shrkengine.ttf");
         setScene(new MenuScene(this, "menuScene"));
     }
 
