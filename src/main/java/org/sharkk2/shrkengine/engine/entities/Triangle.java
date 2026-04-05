@@ -100,19 +100,20 @@ public class Triangle extends Entity2D {
 
     @Override
     public void handleInput(Runnable action) {
-        if (action != null) action.run();
+        if (action != null) {action.run();}
+        else {
+            if (Input.isKeyDown(GLFW_KEY_W)) y -= speed * engine.getDeltaTime();
+            if (Input.isKeyDown(GLFW_KEY_S)) y += speed * engine.getDeltaTime();
+            if (Input.isKeyDown(GLFW_KEY_D)) x += speed * engine.getDeltaTime();
+            if (Input.isKeyDown(GLFW_KEY_A)) x -= speed * engine.getDeltaTime();
 
-        if (Input.isKeyDown(GLFW_KEY_W)) y -= speed * engine.getDeltaTime();
-        if (Input.isKeyDown(GLFW_KEY_S)) y += speed * engine.getDeltaTime();
-        if (Input.isKeyDown(GLFW_KEY_D)) x += speed * engine.getDeltaTime();
-        if (Input.isKeyDown(GLFW_KEY_A)) x -= speed * engine.getDeltaTime();
-
-        float halfW = w * 0.5f;
-        float halfH = h * 0.5f;
-        if (x - halfW < 0f) x = halfW;
-        if (x + halfW > engine.windowWidth) x = engine.windowWidth - halfW;
-        if (y - halfH < 0f) y = halfH;
-        if (y + halfH > engine.windowHeight) y = engine.windowHeight - halfH;
+            float halfW = w * 0.5f;
+            float halfH = h * 0.5f;
+            if (x - halfW < 0f) x = halfW;
+            if (x + halfW > engine.windowWidth) x = engine.windowWidth - halfW;
+            if (y - halfH < 0f) y = halfH;
+            if (y + halfH > engine.windowHeight) y = engine.windowHeight - halfH;
+        }
     }
 
     @Override

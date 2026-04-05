@@ -1,14 +1,18 @@
 package org.sharkk2.shrkengine.engine;
 
+import imgui.extension.imguizmo.flag.Mode;
 import org.joml.Matrix4f;
-import org.joml.Vector3f;
 import org.lwjgl.opengl.GL33;
 import org.sharkk2.shrkengine.engine.classes.Entity2D;
 import org.sharkk2.shrkengine.engine.classes.Entity3D;
+import org.sharkk2.shrkengine.engine.classes.Model;
 import org.sharkk2.shrkengine.engine.classes.Scene;
 import org.sharkk2.shrkengine.engine.entities.Cube;
 import org.sharkk2.shrkengine.engine.entities.Mesh;
+import org.sharkk2.shrkengine.engine.entities.Quad;
 
+import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -37,21 +41,154 @@ public class Renderer {
     }
 
 
-    public int render(Scene scene, boolean useInstancing) {
+    public int renderFramed(List<Entity3D> entities, boolean useInstancing, float frameModelScale) {
+        int renderedObjs = 0;
+        ShaderLoader.Shader outlineShader = ShaderLoader.get("shaders/entities/entity.vert", "shaders/entities/outline.frag");
+
+        if (!useInstancing) {
+            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_FRONT);
+            glFrontFace(GL_CCW);
+
+            for (Entity3D entity : entities) {
+                if (!(entity instanceof Cube || entity instanceof Model)) continue;
+                Matrix4f oldModel = entity.getModel();
+                ShaderLoader.Shader oldShader = entity.getShader();
+                entity.setModel(new Matrix4f(oldModel).scale(frameModelScale));
+                if (entity instanceof Model gmodel) {
+                    for (Mesh m : gmodel.getChildren()) {
+                        ShaderLoader.Shader ms = m.getShader();
+                        Matrix4f mm = m.getModel();
+                        m.setShader(outlineShader);
+                        m.setModel(new Matrix4f(mm).scale(frameModelScale));
+                        m.render();
+                        m.setShader(ms);
+                        m.setModel(mm);
+                    }
+                } else {
+                    entity.setShader(outlineShader);
+                    entity.render();
+                    entity.setShader(oldShader);
+                }
+                entity.setModel(oldModel);
+            }
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            glCullFace(GL_BACK);
+            glDisable(GL_CULL_FACE);
+            return renderedObjs;
+        }
+
+        Map<String, ShaderLoader.Shader> savedShaders = new HashMap<>();
+        List<Cube> framedCubes = new ArrayList<>();
+        Map<Integer, List<Mesh>> meshBatches = new HashMap<>();
+        for (Entity3D entity : entities) {
+            if (!camera.inFrustum(entity)) continue;
+            if (!entity.isAlive()) continue;
+            if (entity instanceof Cube c) {
+                if (isFullyHidden(c)) continue;
+                savedShaders.put(c.getID(), c.getShader());
+                c.setShader(outlineShader);
+                framedCubes.add(c);
+            } else if (entity instanceof Model gmodel) {
+                for (Mesh m : gmodel.getChildren()) {
+                    savedShaders.put(m.getID(), m.getShader());
+                    m.setShader(outlineShader);
+                    meshBatches.computeIfAbsent(m.getMeshData().vao, k -> new ArrayList<>()).add(m);
+                }
+            }
+        }
+
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_FRONT);
+        glFrontFace(GL_CCW);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        for (List<Mesh> batch : meshBatches.values()) { renderedObjs += renderMeshBatch(batch); }
+        renderedObjs += renderCubeBatch(framedCubes, false);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        glCullFace(GL_BACK);
+        glDisable(GL_CULL_FACE);
+        for (Entity3D entity : entities) {
+            if (entity instanceof Cube c) {
+                ShaderLoader.Shader s = savedShaders.get(c.getID());
+                if (s != null) c.setShader(s);
+            } else if (entity instanceof Model gmodel) {
+                for (Mesh m : gmodel.getChildren()) {
+                    ShaderLoader.Shader s = savedShaders.get(m.getID());
+                    if (s != null) m.setShader(s);
+                }
+            }
+        }
+        return renderedObjs;
+    }
+
+    public int render(Scene scene, boolean useInstancing, boolean updateModels) {
+        if (!engine.getIO("wireframe") && engine.getIO("post_processing")) engine.getPostProcessor().bindFBO();
+
+        int renderedObjs = 0;
         runShadowPass();
         if (engine.getSkybox() != null) {
             if (engine.getIO("render_skybox")) engine.getSkybox().render(camera.getViewMatrix(), camera.getProjectionMatrix());
         }
-        int renderedObjs = 0;
+
+        engine.onRender(false);
         List<Entity3D> worldEntities = scene.getWorldEntities();
-        for (Entity2D entity : scene.getScreenEntities()) {if (entity.render()) renderedObjs++;}
+        List<Entity3D> framedEntities = new ArrayList<>();
+        // model updates
+        if (updateModels) {
+            for (Entity3D entity: worldEntities) {
+                if (entity instanceof Cube || entity instanceof Quad) {
+                    entity.setModel(new Matrix4f()
+                            .translate(entity.getX(), entity.getY(), entity.getZ())
+                            .rotateXYZ(entity.getRotation(true))
+                            .scale(entity.getWidth(), entity.getHeight(), entity.getDepth())
+                    );
+                }
+                if (entity instanceof Model m) {
+                    m.setModel(new Matrix4f()
+                            .translate(m.getX(), m.getY(), m.getZ())
+                            .rotateXYZ(m.getRotation(true))
+                            .scale(m.getWidth(), m.getHeight(), m.getDepth())
+                    );
+                    for (Mesh mesh : m.getChildren()) {
+                        mesh.setModel(new Matrix4f()
+                                .translate(mesh.getX(), mesh.getY(), mesh.getZ())
+                                .rotateXYZ(mesh.getRotation(true))
+                                .scale(mesh.getWidth(), mesh.getHeight(), mesh.getDepth())
+                                .mul(mesh.getNodeTransform())
+                        );
+                    }
+                }
+            }
+        }
+
         if (!useInstancing) {
-            for (Entity3D entity : worldEntities) {if (entity.render()) renderedObjs++;}
+            for (Entity3D entity : worldEntities) {
+                if (entity.render()) renderedObjs++;
+                entity.debugRender(false);
+                if (entity.getDebugStage() >= Entity3D.DEBUG_STAGE_FRAME) {
+                    framedEntities.add(entity);
+                }
+            }
+            if (!engine.getIO("wireframe") && engine.getIO("post_processing")) {
+                int bloomTex = -1;
+                if (engine.getIO("bloom")) {
+                    bloomTex = engine.getBloom().render(engine.getPostProcessor().getColorTexture(), engine.getPostProcessor().getQuadVAO(), 4.5f, 4);
+                }
+                engine.getPostProcessor().render(bloomTex);
+            }
+            for (Entity2D entity : scene.getScreenEntities()) {if (entity.render()) renderedObjs++;}
+            if (!framedEntities.isEmpty()) renderFramed(framedEntities, false, 1.01f);
+            engine.onRender(true);
+
             return renderedObjs;
         }
 
         for (Entity3D entity : worldEntities) {
-            if (entity instanceof Cube || entity instanceof Mesh) continue;
+            if (entity.getDebugStage() >= Entity3D.DEBUG_STAGE_FRAME) {
+                framedEntities.add(entity);
+            }
+            if (entity instanceof Cube || entity instanceof Model) continue;
             if (entity.render()) renderedObjs++;
         }
 
@@ -59,22 +196,50 @@ public class Renderer {
         List<Cube> nonTexturedCubes = new ArrayList<>();
         Map<Integer, List<Mesh>> meshBatches = new HashMap<>();
         for (Entity3D e : worldEntities) {
+            e.debugRender(false);
             if (!(e instanceof Cube c)) continue;
+            if (!e.isAlive()) continue;
             if (isFullyHidden(c)) continue;
             if (!camera.inFrustum(c)) continue;
+            if (!e.isVisible()) {
+                continue;
+            }
             if (c.getTextureID() != -1) {texturedCubes.add(c);} else {nonTexturedCubes.add(c);}
         }
 
         for (Entity3D e : worldEntities) {
-            if (!(e instanceof Mesh m)) continue;
-            if (!m.isAlive()) continue;
-            if (!camera.inFrustum(m)) continue;
-            meshBatches.computeIfAbsent(m.getMeshData().vao, k -> new ArrayList<>()).add(m);
+            if (!(e instanceof Model gmodel)) continue;
+            if (!gmodel.isAlive()) continue;
+            if (!camera.inFrustum(gmodel)) continue;
+            if (!gmodel.isVisible()) {
+                for (Mesh m : gmodel.getChildren()) {
+                    Matrix4f model = new Matrix4f().translate(m.getX(), m.getY(), m.getZ())
+                            .rotateXYZ((float) Math.toRadians(m.getAngleX()), (float) Math.toRadians(m.getAngleY()), (float) Math.toRadians(m.getAngleZ()))
+                            .scale(m.getWidth(), m.getHeight(), m.getDepth())
+                            .mul(m.getNodeTransform());
+                    m.setModel(model);
+                }
+                continue;
+            }
+            for (Mesh m : gmodel.getChildren()) {
+                meshBatches.computeIfAbsent(m.getMeshData().vao, k -> new ArrayList<>()).add(m);
+            }
         }
 
         for (List<Mesh> batch : meshBatches.values()) {renderedObjs += renderMeshBatch(batch); }
         renderedObjs += renderCubeBatch(texturedCubes,true);
         renderedObjs += renderCubeBatch(nonTexturedCubes,false);
+        if (!engine.getIO("wireframe") && engine.getIO("post_processing")) {
+            int bloomTex = -1;
+            if (engine.getIO("bloom") && engine.getIO("hdr")) {
+                bloomTex = engine.getBloom().render(engine.getPostProcessor().getColorTexture(), engine.getPostProcessor().getQuadVAO(), 4.5f, 4);
+            }
+            engine.getPostProcessor().render(bloomTex);
+        }
+        for (Entity2D entity : scene.getScreenEntities()) {if (entity.render()) renderedObjs++;}
+        if (!framedEntities.isEmpty()) renderFramed(framedEntities, true, 1.01f);
+
+        engine.onRender(true);
         return renderedObjs;
     }
 
@@ -96,7 +261,7 @@ public class Renderer {
         shader.setMat4("projection", camera.getProjectionMatrix());
         shader.setMat4("view", camera.getViewMatrix());
         shader.setInt("useInstancing",1);
-        shader.setFloat4("color", first.getColor().x, first.getColor().y, first.getColor().z, first.getColor().w);
+        shader.setFloat4("color", first.getColorRGBA().x, first.getColorRGBA().y, first.getColorRGBA().z, first.getColorRGBA().w);
         shader.setInt("atlasSize", engine.getTextureLoader().getAtlasSize());
         shader.setFloat("utime", (float) glfwGetTime());
         shader.setInt("useColorMask",1);
@@ -120,21 +285,15 @@ public class Renderer {
         int idx = 0;
         for (Cube c : cubes) {
             engine.onEntity3DRender(c);
-            Matrix4f m = new Matrix4f()
-                    .translate(c.getX(), c.getY(), c.getZ())
-                    .rotateXYZ(
-                            (float) Math.toRadians(c.getAngleX()),
-                            (float) Math.toRadians(c.getAngleY()),
-                            (float) Math.toRadians(c.getAngleZ()))
-                    .scale(c.getWidth(), c.getHeight(), c.getDepth());
-            m.get(instanceMatrices, idx);
+            Matrix4f model = c.getModel();
+            model.get(instanceMatrices, idx);
             idx += 16;
         }
 
-
         int matVBO = instanceMatrixVBOs.computeIfAbsent(vao, k -> glGenBuffers());
         glBindBuffer(GL_ARRAY_BUFFER, matVBO);
-        glBufferData(GL_ARRAY_BUFFER, instanceMatrices, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, count * 16L * Float.BYTES, GL_DYNAMIC_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, instanceMatrices);
         for (int i = 0; i < 4; i++) {
             glVertexAttribPointer(3 + i, 4, GL_FLOAT, false, 16 * Float.BYTES, i * 4L * Float.BYTES);
             glEnableVertexAttribArray(3 + i);
@@ -146,30 +305,32 @@ public class Renderer {
         for (int i = 0; i < count; i++) {
             Cube c = cubes.get(i);
             texIndices[i] = textured ? c.getTextureNum() : 0;
-            instanceColors[i*4] = c.getColor().x;
-            instanceColors[i*4+1] = c.getColor().y;
-            instanceColors[i*4+2] = c.getColor().z;
-            instanceColors[i*4+3] = c.getColor().w;
+            instanceColors[i*4] = c.getColorRGBA().x;
+            instanceColors[i*4+1] = c.getColorRGBA().y;
+            instanceColors[i*4+2] = c.getColorRGBA().z;
+            instanceColors[i*4+3] = c.getColorRGBA().w;
         }
 
         int texVBO = instanceTexVBOs.computeIfAbsent(vao, k -> glGenBuffers());
         glBindBuffer(GL_ARRAY_BUFFER, texVBO);
-        glBufferData(GL_ARRAY_BUFFER, texIndices, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, (long)count * Integer.BYTES, GL_DYNAMIC_DRAW); // orphan
+        glBufferSubData(GL_ARRAY_BUFFER, 0, texIndices);
         glVertexAttribIPointer(7, 1, GL_INT, Integer.BYTES, 0);
         glEnableVertexAttribArray(7);
         glVertexAttribDivisor(7, 1);
 
         int colorVBO = instanceColorVBOs.computeIfAbsent(vao, k -> glGenBuffers());
         glBindBuffer(GL_ARRAY_BUFFER, colorVBO);
-        glBufferData(GL_ARRAY_BUFFER, instanceColors, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, count * 4L * Float.BYTES, GL_DYNAMIC_DRAW); // orphan
+        glBufferSubData(GL_ARRAY_BUFFER, 0, instanceColors);
         glVertexAttribPointer(8, 4, GL_FLOAT, false, 4 * Float.BYTES, 0);
         glEnableVertexAttribArray(8);
         glVertexAttribDivisor(8, 1);
 
-        float[] instanceMaterials = new float[count * 11];
+        float[] instanceMaterials = new float[count * 15];
         for (int i = 0; i < count; i++) {
             Cube c = cubes.get(i);
-            int m = i * 11;
+            int m = i * 15;
             instanceMaterials[m] = c.material.ambient.x;
             instanceMaterials[m+1] = c.material.ambient.y;
             instanceMaterials[m+2] = c.material.ambient.z;
@@ -179,33 +340,46 @@ public class Renderer {
             instanceMaterials[m+6] = c.material.specular.x;
             instanceMaterials[m+7] = c.material.specular.y;
             instanceMaterials[m+8] = c.material.specular.z;
-            instanceMaterials[m+9] = c.material.shininess;
-            instanceMaterials[m+10] = c.material.applyLight? 1f:0f;
+            instanceMaterials[m+9] = c.material.emissive.x;
+            instanceMaterials[m+10] = c.material.emissive.y;
+            instanceMaterials[m+11] = c.material.emissive.z;
+            instanceMaterials[m+12] = c.material.shininess;
+            instanceMaterials[m+13] = c.material.applyLight? 1f:0f;
+            instanceMaterials[m+14] = c.material.rainbowEffect? 1f:0f;
+
         }
 
         int matPropVBO = instanceMaterialVBOs.computeIfAbsent(vao, k -> glGenBuffers());
         glBindBuffer(GL_ARRAY_BUFFER, matPropVBO);
-        glBufferData(GL_ARRAY_BUFFER, instanceMaterials, GL_DYNAMIC_DRAW);
-        //ambient
-        glVertexAttribPointer(9,  3, GL_FLOAT, false, 11 * Float.BYTES, 0);
+        glBufferData(GL_ARRAY_BUFFER, count * 15L * Float.BYTES, GL_DYNAMIC_DRAW); // orphan
+        glBufferSubData(GL_ARRAY_BUFFER, 0, instanceMaterials);//ambient
+        glVertexAttribPointer(9,  3, GL_FLOAT, false, 15 * Float.BYTES, 0);
         glEnableVertexAttribArray(9);
         glVertexAttribDivisor(9, 1);
         //diffuse
-        glVertexAttribPointer(10, 3, GL_FLOAT, false, 11 * Float.BYTES, 3 * Float.BYTES);
+        glVertexAttribPointer(10, 3, GL_FLOAT, false, 15 * Float.BYTES, 3 * Float.BYTES);
         glEnableVertexAttribArray(10);
         glVertexAttribDivisor(10, 1);
         //specular
-        glVertexAttribPointer(11, 3, GL_FLOAT, false, 11 * Float.BYTES, 6 * Float.BYTES);
+        glVertexAttribPointer(11, 3, GL_FLOAT, false, 15 * Float.BYTES, 6 * Float.BYTES);
         glEnableVertexAttribArray(11);
         glVertexAttribDivisor(11, 1);
-        //shininess
-        glVertexAttribPointer(12, 1, GL_FLOAT, false, 11 * Float.BYTES, 9 * Float.BYTES);
+        // emissive
+        glVertexAttribPointer(12, 3, GL_FLOAT, false, 15 * Float.BYTES, 9 * Float.BYTES);
         glEnableVertexAttribArray(12);
         glVertexAttribDivisor(12, 1);
-        //applylight
-        glVertexAttribPointer(13, 1, GL_FLOAT, false, 11 * Float.BYTES, 10 * Float.BYTES);
+        //shininess
+        glVertexAttribPointer(13, 1, GL_FLOAT, false, 15 * Float.BYTES, 12 * Float.BYTES);
         glEnableVertexAttribArray(13);
         glVertexAttribDivisor(13, 1);
+        //applylight
+        glVertexAttribPointer(14, 1, GL_FLOAT, false, 15 * Float.BYTES, 13 * Float.BYTES);
+        glEnableVertexAttribArray(14);
+        glVertexAttribDivisor(14, 1);
+        // rainbno effect
+        glVertexAttribPointer(15, 1, GL_FLOAT, false, 15 * Float.BYTES, 14 * Float.BYTES);
+        glEnableVertexAttribArray(15);
+        glVertexAttribDivisor(15, 1);
 
         if (!engine.getIO("wireframe")) {
             glEnable(GL_CULL_FACE);
@@ -238,8 +412,6 @@ public class Renderer {
         shader.setInt("atlasSize", 1);
         shader.setInt("textureIndex", 0);
         shader.setFloat("utime", (float) glfwGetTime());
-        shader.setInt("numPointLights", engine.getLightManager().getPointLights().size());
-        shader.setVec3("cameraPos", camera.getPosition());
         shader.setFloat("textureScale", -1);
         setSceneUniforms(shader, currentScene);
         setLightUniforms(shader);
@@ -270,23 +442,21 @@ public class Renderer {
         int count = meshes.size();
         float[] matrices = new float[count*16];
         float[] colors = new float[count*4];
-        float[] materials = new float[count*11];
+        float[] materials = new float[count*15];
 
         for (int i = 0; i < count; i++) {
             Mesh m = meshes.get(i);
             engine.onEntity3DRender(m);
-            new Matrix4f().translate(m.getX(), m.getY(), m.getZ())
-                    .rotateXYZ((float) Math.toRadians(m.getAngleX()), (float) Math.toRadians(m.getAngleY()), (float) Math.toRadians(m.getAngleZ()))
-                    .scale(m.getWidth(), m.getHeight(), m.getDepth())
-                    .mul(m.getNodeTransform())
-                    .get(matrices, i*16);
+            Matrix4f model = m.getModel();
 
-            colors[i*4] = m.getColor().x;
-            colors[i*4+1] = m.getColor().y;
-            colors[i*4+2] = m.getColor().z;
-            colors[i*4+3] = m.getColor().w;
 
-            int b = i*11;
+            model.get(matrices, i*16);
+            colors[i*4] = m.getColorRGBA().x;
+            colors[i*4+1] = m.getColorRGBA().y;
+            colors[i*4+2] = m.getColorRGBA().z;
+            colors[i*4+3] = m.getColorRGBA().w;
+
+            int b = i*15;
             materials[b] = m.material.ambient.x;
             materials[b+1]= m.material.ambient.y;
             materials[b+2] = m.material.ambient.z;
@@ -296,13 +466,19 @@ public class Renderer {
             materials[b+6] = m.material.specular.x;
             materials[b+7] = m.material.specular.y;
             materials[b+8] = m.material.specular.z;
-            materials[b+9] = m.material.shininess;
-            materials[b+10] = m.material.applyLight?1f:0f;
+            materials[b+9] = m.material.emissive.x;
+            materials[b+10] = m.material.emissive.y;
+            materials[b+11] = m.material.emissive.z;
+            materials[b+12] = m.material.shininess;
+            materials[b+13] = m.material.applyLight ? 1:0;
+            materials[b+14] = m.material.rainbowEffect ? 1:0;
+      //      if (m.material.rainbowEffect) System.out.println(m.getID() + " is gay");
         }
 
         int matVBO = meshMatrixVBOs.computeIfAbsent(vao, k -> glGenBuffers());
         glBindBuffer(GL_ARRAY_BUFFER, matVBO);
-        glBufferData(GL_ARRAY_BUFFER, matrices, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, count * 16L * Float.BYTES, GL_STREAM_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, matrices);
         for (int i = 0; i < 4; i++) {
             glVertexAttribPointer(3 + i, 4, GL_FLOAT, false, 16 * Float.BYTES, i * 4L * Float.BYTES);
             glEnableVertexAttribArray(3 + i);
@@ -311,34 +487,44 @@ public class Renderer {
 
         int colorVBO = meshColorVBOs.computeIfAbsent(vao, k -> glGenBuffers());
         glBindBuffer(GL_ARRAY_BUFFER, colorVBO);
-        glBufferData(GL_ARRAY_BUFFER, colors, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, count * 4L * Float.BYTES, GL_STREAM_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, colors);
         glVertexAttribPointer(8, 4, GL_FLOAT, false, 4 * Float.BYTES, 0);
         glEnableVertexAttribArray(8);
         glVertexAttribDivisor(8, 1);
 
         int matPropVBO = meshMaterialVBOs.computeIfAbsent(vao, k -> glGenBuffers());
         glBindBuffer(GL_ARRAY_BUFFER, matPropVBO);
-        glBufferData(GL_ARRAY_BUFFER, materials, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, count * 15L * Float.BYTES, GL_STREAM_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, materials);
         // ambient
-        glVertexAttribPointer(9,  3, GL_FLOAT, false, 11 * Float.BYTES, 0);
+        glVertexAttribPointer(9,  3, GL_FLOAT, false, 15 * Float.BYTES, 0);
         glEnableVertexAttribArray(9);
         glVertexAttribDivisor(9, 1);
         // diffuse
-        glVertexAttribPointer(10, 3, GL_FLOAT, false, 11 * Float.BYTES, 3 * Float.BYTES);
+        glVertexAttribPointer(10, 3, GL_FLOAT, false, 15 * Float.BYTES, 3 * Float.BYTES);
         glEnableVertexAttribArray(10);
         glVertexAttribDivisor(10, 1);
         // specular
-        glVertexAttribPointer(11, 3, GL_FLOAT, false, 11 * Float.BYTES, 6 * Float.BYTES);
+        glVertexAttribPointer(11, 3, GL_FLOAT, false, 15 * Float.BYTES, 6 * Float.BYTES);
         glEnableVertexAttribArray(11);
         glVertexAttribDivisor(11, 1);
-        // shininess
-        glVertexAttribPointer(12, 1, GL_FLOAT, false, 11 * Float.BYTES, 9 * Float.BYTES);
+
+        glVertexAttribPointer(12, 3, GL_FLOAT, false, 15 * Float.BYTES, 9 * Float.BYTES);
         glEnableVertexAttribArray(12);
         glVertexAttribDivisor(12, 1);
-        // applylight
-        glVertexAttribPointer(13, 1, GL_FLOAT, false, 11 * Float.BYTES, 10 * Float.BYTES);
+        // shininess
+        glVertexAttribPointer(13, 1, GL_FLOAT, false, 15 * Float.BYTES, 12 * Float.BYTES);
         glEnableVertexAttribArray(13);
         glVertexAttribDivisor(13, 1);
+        // applylight
+        glVertexAttribPointer(14, 1, GL_FLOAT, false, 15 * Float.BYTES, 13 * Float.BYTES);
+        glEnableVertexAttribArray(14);
+        glVertexAttribDivisor(14, 1);
+        // rainbow
+        glVertexAttribPointer(15, 1, GL_FLOAT, false, 15 * Float.BYTES, 14 * Float.BYTES);
+        glEnableVertexAttribArray(15);
+        glVertexAttribDivisor(15, 1);
 
         glDrawElementsInstanced(GL_TRIANGLES, first.getMeshData().indexCount, GL_UNSIGNED_INT, 0, count);
         glBindVertexArray(0);
@@ -364,7 +550,7 @@ public class Renderer {
         if (!scene.globalSceneLight.castShadow) return;
 
         int prevFBO = glGetInteger(GL_FRAMEBUFFER_BINDING); // TURNS OUT THE FUCKASS PP WAS THE REASON BEHIND THIS MESS
-        // I HAVE TO REVERT BACK TO THE PP's FBO INSTEAD OF JUST RESETING LIKE AN IDIOT
+        // I HAVE TO REVERT BACK TO THE PP's FBO INSTEAD OF JUST RESETTING LIKE AN IDIOT
         // I SPENT LIKE 4 DAYS ON THIS FUCKING BUG
 
         glViewport(0, 0, LightManager.ShadowMap.SHADOW_WIDTH, LightManager.ShadowMap.SHADOW_HEIGHT);
@@ -379,13 +565,18 @@ public class Renderer {
         List<Cube> allCubes = scene.getWorldEntities().stream()
                 .filter(e -> e instanceof Cube)
                 .map(e -> (Cube) e)
-                .filter(c -> !isFullyHidden(c))
+                .filter(c -> !isFullyHidden(c) && c.isVisible())
                 .toList();
 
         renderDepthBatch(allCubes);
         for (Entity3D e : scene.getWorldEntities()) {
-            if (e instanceof Mesh mesh && mesh.isAlive()) {
-                renderDepthMesh(mesh);
+            if (e instanceof Model gmodel && gmodel.isAlive() && gmodel.isVisible()) {
+                for (Mesh mesh : gmodel.getChildren()) {
+                    depthShader.setInt("useInstancing", 0);
+                    depthShader.setMat4("model", mesh.getModel());
+                    mesh.renderDepth();
+                }
+
             }
         }
 
@@ -409,20 +600,13 @@ public class Renderer {
         float[] instanceMatrices = new float[count * 16];
         int idx = 0;
         for (Cube c : cubes) {
-            Matrix4f m = new Matrix4f()
-                    .translate(c.getX(), c.getY(), c.getZ())
-                    .rotateXYZ(
-                            (float) Math.toRadians(c.getAngleX()),
-                            (float) Math.toRadians(c.getAngleY()),
-                            (float) Math.toRadians(c.getAngleZ()))
-                    .scale(c.getWidth(), c.getHeight(), c.getDepth());
-            m.get(instanceMatrices, idx);
+            c.getModel().get(instanceMatrices, idx);
             idx += 16;
         }
 
         int matVBO = instanceMatrixVBOs.computeIfAbsent(vao, k -> glGenBuffers());
         glBindBuffer(GL_ARRAY_BUFFER, matVBO);
-        glBufferData(GL_ARRAY_BUFFER, instanceMatrices, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, instanceMatrices, GL_STREAM_DRAW);
         for (int i = 0; i < 4; i++) {
             glVertexAttribPointer(3 + i, 4, GL_FLOAT, false, 16 * Float.BYTES, i * 4L * Float.BYTES);
             glEnableVertexAttribArray(3 + i);
@@ -433,19 +617,6 @@ public class Renderer {
         glBindVertexArray(0);
     }
 
-    private void renderDepthMesh(Mesh mesh) { // TODO: instance this
-        depthShader.setInt("useInstancing", 0);
-        Matrix4f m = new Matrix4f()
-                .translate(mesh.getX(), mesh.getY(), mesh.getZ())
-                .rotateXYZ(
-                        (float) Math.toRadians(mesh.getAngleX()),
-                        (float) Math.toRadians(mesh.getAngleY()),
-                        (float) Math.toRadians(mesh.getAngleZ()))
-                .scale(mesh.getWidth(), mesh.getHeight(), mesh.getDepth())
-                .mul(mesh.getNodeTransform());
-        depthShader.setMat4("model", m);
-        mesh.renderDepth();
-    }
 
     private void setSceneUniforms(ShaderLoader.Shader shader, Scene scene) {
         shader.setVec3("fog.color", scene.sceneFog.color);
@@ -459,6 +630,7 @@ public class Renderer {
         shader.setVec3("dirLight.ambient", scene.globalSceneLight.ambient);
         shader.setInt("dirLight.enabled", scene.globalSceneLight.enabled ? 1 : 0);
         shader.setInt("dirLight.passShadow", scene.globalSceneLight.castShadow ? 1 : 0);
+        shader.setVec3("skycolor", scene.sceneTime.getSkyColor(true));
     }
 
     public void cleanup() {

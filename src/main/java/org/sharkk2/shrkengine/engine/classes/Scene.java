@@ -20,7 +20,10 @@ public abstract class Scene {
     protected final Camera camera;
     protected final List<Entity2D> screenEntities = new ArrayList<>();
     protected final List<Entity3D> worldEntities = new ArrayList<>();
-    protected final Map<String, Entity3D> worldMap = new HashMap<>();
+    protected final Map<String, Entity3D> worldEntityMap = new HashMap<>();
+    protected final Map<String, Entity3D> worldPosMap = new HashMap<>();
+    protected final Map<String, Entity2D> screenEntityMap = new HashMap<>();
+
     public final GlobalSceneLight globalSceneLight = new GlobalSceneLight();
     public final Time sceneTime = new Time(this);
     public final Fog sceneFog = new Fog();
@@ -35,13 +38,20 @@ public abstract class Scene {
         public boolean enabled = true;
 
         public void setAmbient(float r, float g, float b) {ambient.set(r,g,b);}
-        public void setDirection(Vector3f direction) {this.direction = direction.normalize();}
+        public void setDirection(Vector3f direction) {
+            this.direction = direction.normalize();
+            float sunHeight = direction.negate(new Vector3f()).y;
+            float dayBlend = Math.max(sunHeight * 2.0f, 0.0f);
+
+            float ambientStrength = 0.01f + 0.19f * dayBlend;
+            setAmbient(ambientStrength, ambientStrength, ambientStrength);
+        }
         public void setColor(float r, float g, float b) {color.set(r,g,b);}
         public void setShadow(boolean v) {castShadow = v;}
         public void enable(boolean v) {enabled = v;}
 
         public Matrix4f getLightSpace(Camera camera) {
-            float size = 40;
+            float size = 32;
             Matrix4f lightSpace = new Matrix4f();
             Matrix4f lightProj = new Matrix4f().ortho(-size, size, -size, size, 1f, 300f);
             Vector3f lightDir = new Vector3f(direction).normalize();
@@ -59,21 +69,30 @@ public abstract class Scene {
     }
 
     public static class Time {
-        public double dayLength = 90;
+        public double dayLength = 180;
         private Scene scene;
+        private double time;
 
-        public Time(Scene scene) {this.scene = scene;}
+        public Time(Scene scene) {
+            this.scene = scene;
+
+        }
 
         public double getDayLength() {return dayLength;}
         public void setDayLength(double dayLength) {this.dayLength = dayLength;}
-        public double getTime() {
-            double t = glfwGetTime();
-            t = (t % dayLength) / dayLength;
-            return t;
+        public double getTime() {return time;}
+        public void setTime(double t) {
+            this.time = t;
+            double angle = time * 2 * Math.PI;
+            Vector3f lightDir = new Vector3f(0, (float)Math.sin(angle), (float)Math.cos(angle)).normalize();
+            scene.globalSceneLight.setDirection(lightDir);
+            scene.sceneFog.setColor(getSkyColor(true));
         }
 
         public void tick() {
-            double angle = (glfwGetTime() / dayLength) * 2 * Math.PI;
+            double t = glfwGetTime();
+            time = (t % dayLength) / dayLength;
+            double angle = time * 2 * Math.PI;
             Vector3f lightDir = new Vector3f(0, (float)Math.sin(angle), (float)Math.cos(angle)).normalize();
             scene.globalSceneLight.setDirection(lightDir);
             scene.sceneFog.setColor(getSkyColor(true));
@@ -123,10 +142,6 @@ public abstract class Scene {
 
             float hazeBand = (float)(Math.exp(-t * 20.0) * Math.min(Math.max(1.0f - Math.abs(t) * 6.0f, 0.0f), 1.0f));
             skyColor = Utils.mix(skyColor, hazeColor, hazeBand * 0.5f);
-            skyColor.x = (float)Math.pow(skyColor.x / (skyColor.x + 0.6f), 1.0 / 2.2);
-            skyColor.y = (float)Math.pow(skyColor.y / (skyColor.y + 0.6f), 1.0 / 2.2);
-            skyColor.z = (float)Math.pow(skyColor.z / (skyColor.z + 0.6f), 1.0 / 2.2);
-
             return skyColor;
         }
     }
@@ -136,9 +151,9 @@ public abstract class Scene {
         public float start = 20f;
         public float end = 80f;
         public float density = 0.05f;
-        public static final int EXPONENTIAL = 1;
-        public static final int LINEAR = 0;
-        public static final int DISABLED = 2;
+        public final int EXPONENTIAL = 1;
+        public final int LINEAR = 0;
+        public final int DISABLED = -1;
         public int mode = 1;
 
         public void setMode(int mode) {this.mode = mode;}
@@ -157,21 +172,27 @@ public abstract class Scene {
     public abstract void load();
     public abstract void tick();
     public abstract void onDestroy();
+    public abstract void onScreenResize(int oldWidth, int oldHeight);
 
-    public Entity3D getEntity(float x, float y, float z, boolean rounded) {
+    public Map<String, Entity3D> getWorldMap() {return worldEntityMap;}
+    public List<Entity2D> getScreenEntities() {return screenEntities;}
+    public List<Entity3D> getWorldEntities() {return worldEntities;}
+    public void addWorldEntity(Entity3D e) {
+        worldEntities.add(e); worldEntityMap.put(e.getID(), e); worldPosMap.put(e.x + ":" + e.y + ":" + e.z, e);
+    }
+
+    public void addScreenEntity(Entity2D e) {screenEntities.add(e); screenEntityMap.put(e.getID(), e);}
+    public Entity3D getWorldEntity(String id) {return worldEntityMap.get(id);}
+    public Entity2D getScreenEntity(String id) {return screenEntityMap.get(id);}
+    public Entity3D getEntityAt(float x, float y, float z, boolean rounded) {
         if (rounded) {
             x = (float)Math.floor(x);
             y = (float)Math.floor(y);
             z = (float)Math.floor(z);
         }
-        return worldMap.get((int)x + ":" + (int)y + ":" + (int)z);
+        return worldPosMap.get(x + ":" + y + ":" + z);
     }
 
-    public Map<String, Entity3D> getWorldMap() {return worldMap;}
-    public List<Entity2D> getScreenEntities() {return screenEntities;}
-    public List<Entity3D> getWorldEntities() {return worldEntities;}
-    public void addWorldEntity(Entity3D e) {worldEntities.add(e); worldMap.put(e.x + ":" + e.y + ":" + e.z, e);}
-    public void addScreenEntity(Entity2D e) {screenEntities.add(e);}
     public String getName() {return sceneName;}
     public void destroy() {
         onDestroy();
@@ -179,7 +200,8 @@ public abstract class Scene {
             e.cleanup();
         }
         worldEntities.clear();
-        worldMap.clear();
+        worldEntityMap.clear();
+        screenEntityMap.clear();
         screenEntities.clear();
     }
 }

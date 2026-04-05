@@ -25,7 +25,7 @@ public class MenuScene extends Scene {
     private final List<Integer> buttonTexts = new ArrayList<>();
     private final int margin = 60;
     private final int moveMargin = 95;
-    private final float pointerY = 185;
+    private final float pointerY = 255;
     private int selected = 0;
     private int tId;
     private int gid;
@@ -45,27 +45,41 @@ public class MenuScene extends Scene {
 
     @Override
     public void tick() {
-        if (Input.isKeyDown(GLFW_KEY_ENTER) || Input.isKeyDown(GLFW_KEY_RIGHT) || Input.isKeyDown(GLFW_KEY_D)) {
+        //if (Input.isKeyDown(GLFW_KEY_ESCAPE)) System.exit(0);
+        if (Input.isKeyPressed(GLFW_KEY_ENTER) || Input.isKeyPressed(GLFW_KEY_RIGHT) || Input.isKeyPressed(GLFW_KEY_D)) {
             if (selected == 0) {
+                Quadrilateral quad = new Quadrilateral(engine);
+                quad.setColor(0,0,0,1);
+                quad.setSize(engine.windowWidth, engine.windowHeight);
                 engine.getTextManager().removeGroup(gid);
-                engine.getWorld().setCurrentScene(new WorldScene(engine, "worldScene"));
+                TextManager.TextGroup tg = engine.getTextManager().createTextGroup();
+                tg.addText(new TextManager.Text(240,240, 40, 0.4f,0.3f,1,1,"Loading.."));
+                addScreenEntity(quad);
+                engine.runNextFrame(() -> {
+                    engine.getTextManager().removeGroup(tg.groupID);
+                    engine.getWorld().setCurrentScene(new WorldScene(engine, "worldScene"));
+                }, false);
             } else if (selected == 2) {
                 System.exit(0);
             } else if (selected == 1) {
                TextManager.TextGroup textGroup = engine.getTextManager().getTextGroup(gid);
             }
         }
-        screenEntities.removeIf(e -> !e.isAlive());
-        worldEntities.removeIf(e -> {
+        screenEntities.removeIf(e -> {
             if (!e.isAlive()) {
-                int keyX = Math.round(e.getX());
-                int keyY = Math.round(e.getY());
-                int keyZ = Math.round(e.getZ());
-                worldMap.remove(keyX + ":" + keyY + ":" + keyZ);
+                screenEntityMap.remove(e.getID());
                 return true;
             }
             return false;
         });
+        worldEntities.removeIf(e -> {
+            if (!e.isAlive()) {
+                worldEntityMap.remove(e.getID());
+                return true;
+            }
+            return false;
+        });
+
         for (Entity3D entity : worldEntities) {
             entity.handleInput(null);
             if (entity instanceof Cube) {
@@ -79,7 +93,7 @@ public class MenuScene extends Scene {
                     if (angleY >= 360f) angleY -= 360f;
                     if (angleZ >= 360f) angleZ -= 360f;
 
-                    entity.setAngles(angleX, angleY, angleZ);
+                    entity.setRotation(angleX, angleY, angleZ);
                 });
             }
         }
@@ -141,12 +155,12 @@ public class MenuScene extends Scene {
 
     @Override
     public void load() {
-        globalSceneLight.enable(false);
-        camera.setViewLock(true);
-        camera.setPositionlock(true);
         camera.setPosition(10, 5, 10);
         camera.setPitch(-67);
         camera.setYaw(72);
+        globalSceneLight.enable(false);
+        camera.setViewLock(true);
+        camera.setPositionlock(true);
         int gridSize = 24;
         int gridHeight = 2;
         for (int i = 0; i < gridSize; i++) {
@@ -157,8 +171,7 @@ public class MenuScene extends Scene {
                     cube.setPosition(i, k, v);
                     cube.setSize(1, 1, 1);
                     cube.material.setSpecular(0.1f,0.1f,0.1f);
-                    worldEntities.add(cube);
-                    worldMap.put(i + ":" + k + ":" + v, cube);
+                    addWorldEntity(cube);
                 }
             }
         }
@@ -171,8 +184,8 @@ public class MenuScene extends Scene {
         pointerTarget = pointerY;
         TextManager.TextGroup textGroup = engine.getTextManager().createTextGroup();
         gid = textGroup.groupID;
-        textGroup.addText(new TextManager.Text(30, 75, 85, 1, 0, 0, 1, "nigga game"));
-        int startY = 75 + margin;
+        textGroup.addText(new TextManager.Text(30, 120, 85, 1, 0, 0, 1, "nigga game"));
+        int startY = 120 + margin;
         for (Map.Entry<String, Integer> entry : buttons.entrySet()) {
             TextManager.Text t = new TextManager.Text(85, startY, 75, 1, 1, 1, 1, entry.getKey());
             textGroup.addText(t);
@@ -193,4 +206,7 @@ public class MenuScene extends Scene {
             }
         }
     }
+
+    @Override
+    public void onScreenResize(int oldWidth, int oldHeight) {}
 }

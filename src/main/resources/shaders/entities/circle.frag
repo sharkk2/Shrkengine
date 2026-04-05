@@ -12,7 +12,7 @@ void main() {
     vec4 colour = color;
     if (length(fragPos) > 1.0) discard;
     if (useTexture) {
-        color *= texture(texSampler, TexCoord);
+        colour *= texture(texSampler, TexCoord);
     }
 
     FragColor = colour;

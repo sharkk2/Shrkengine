@@ -40,7 +40,7 @@ public class World {
 
     public int renderScene(boolean useInstancing) {
         currentScene.tick();
-        return engine.getRenderer().render(currentScene, useInstancing);
+        return engine.getRenderer().render(currentScene, useInstancing, true); //keep update models true or entire engine breaks
     }
 
     public Scene getCurrentScene() {return currentScene;}

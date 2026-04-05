@@ -131,12 +131,13 @@ public class Cube extends Entity3D {
                         (float)Math.toRadians(angleY),
                         (float)Math.toRadians(angleZ))
                 .scale(w, h, d);
+        computeBounds(vertices);
     }
 
     @Override
     public boolean doRender() {
         // any further optimizations are prolly not worth it
-        if (!alive) return false;
+
         if (!camera.inFrustum(this)) {return false;}
         shader.use();
         glBindVertexArray(vao);
@@ -144,17 +145,14 @@ public class Cube extends Entity3D {
         Camera camera = engine.getCamera();
         Matrix4f projection = camera.getProjectionMatrix();
         Matrix4f view = camera.getViewMatrix();
-        model = new Matrix4f()
-                .translate(x, y, z)
-                .rotateXYZ((float)Math.toRadians(angleX),
-                        (float)Math.toRadians(angleY),
-                        (float)Math.toRadians(angleZ))
-                .scale(w, h, d);
+
+        if (!alive) return false;
+        if (!visible) return false;
 
         shader.setMat4("model", model);
         shader.setMat4("projection", projection);
         shader.setMat4("view", view);
-        shader.setVec4("color", getColor());
+        shader.setVec4("color", getColorRGBA());
         shader.setInt("useInstancing", 0);
         shader.setInt("atlasSize", engine.getTextureLoader().getAtlasSize());
         shader.setInt("textureIndex", textureNum);
@@ -165,8 +163,10 @@ public class Cube extends Entity3D {
         shader.setVec3("material.ambient", material.ambient);
         shader.setVec3("material.diffuse", material.diffuse);
         shader.setVec3("material.specular", material.specular);
+        shader.setVec3("material.emissive", material.emissive);
         shader.setFloat("material.shininess", material.shininess);
         shader.setFloat("material.applyLight", material.applyLight? 1:0);
+        shader.setFloat("material.rainbowEffect", material.rainbowEffect? 1:0);
         Scene currentScene = engine.getWorld().getCurrentScene();;
         shader.setVec3("dirLight.direction", currentScene.globalSceneLight.direction);
         shader.setVec3("dirLight.color", currentScene.globalSceneLight.color);
@@ -224,6 +224,7 @@ public class Cube extends Entity3D {
     @Override
     public void update(Runnable action) {
         if (action != null) action.run();
+
     }
 
     @Override
@@ -239,12 +240,12 @@ public class Cube extends Entity3D {
 
     public void checkNeighbours() {
         Scene scene = engine.getWorld().getCurrentScene();
-        fFront = scene.getEntity(x, y, z + 1, false) != null;
-        fBack = scene.getEntity(x, y, z - 1, false) != null;
-        fLeft = scene.getEntity(x - 1, y, z, false) != null;
-        fRight = scene.getEntity(x + 1, y, z, false) != null;
-        fTop = scene.getEntity(x, y + 1, z, false) != null;
-        fBottom = scene.getEntity(x, y - 1, z, false) != null;
+        fFront = scene.getEntityAt(x, y, z + 1, false) instanceof Cube;
+        fBack = scene.getEntityAt(x, y, z - 1, false) instanceof Cube;
+        fLeft = scene.getEntityAt(x - 1, y, z, false) instanceof Cube;
+        fRight = scene.getEntityAt(x + 1, y, z, false) instanceof Cube;
+        fTop = scene.getEntityAt(x, y + 1, z, false) instanceof Cube;
+        fBottom = scene.getEntityAt(x, y - 1, z, false) instanceof Cube;
     }
 
     @Override
@@ -257,6 +258,8 @@ public class Cube extends Entity3D {
             initialized = false;
         }
     }
+
+
     public int getTextureID() {return textureID;}
     public int getTextureNum() {return textureNum;}
     public int getVboUV() {return vboUV;}
@@ -266,4 +269,30 @@ public class Cube extends Entity3D {
     }
     public void setTextureScale(float v) {this.textureScale = getWidth() / v;}
     public int getVao() {return vao;}
+
+
+    public Cube clone() {
+        Cube clone = new Cube(engine);
+        clone.setPosition(getX(), getY(), getZ());
+        clone.material.setAmbient(material.ambient);
+        clone.material.setEmissive(material.emissive);
+        clone.material.setShininess(material.shininess);
+        clone.material.setDiffuse(material.diffuse);
+        clone.material.setSpecular(material.specular);
+        clone.material.applyLight(material.applyLight);
+        clone.setSize(getWidth(), getHeight(), getDepth());
+        clone.setColor(getColorRGBA().x, getColorRGBA().y, getColorRGBA().z, getColorRGBA().w);
+        clone.setID(getID() + "_clone");
+        clone.setRotation(getAngleX(), getAngleY(), getAngleZ());
+        clone.setModel(getModel());
+        if (textureID != -1) clone.applyTexture(getTextureNum());
+        clone.setShader(getShader());
+        clone.setVisibility(isVisible());
+        if (light != null) {
+            clone.attachLight(new LightManager.PointLight(light.lightRange, light.position, light.color, light.intensity));
+        }
+        clone.setTextureScale(textureScale);
+        return clone;
+    }
+
 }

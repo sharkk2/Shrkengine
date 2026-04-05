@@ -24,7 +24,9 @@ public class PostProcessor {
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         colorTexture = glGenTextures();
         glBindTexture(GL_TEXTURE_2D, colorTexture);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, 0);
+        if (engine.getIO("hdr")) {
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+        } else glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, 0);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorTexture, 0);
@@ -65,14 +67,33 @@ public class PostProcessor {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     }
 
-    public void render() {
+    public void render(int bloomTexture) {
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glDisable(GL_DEPTH_TEST);
         glClear(GL_COLOR_BUFFER_BIT);
         shader.use();
+        shader.setFloat("exposure", engine.getNumValue("exposure"));
+        shader.setFloat("saturation", engine.getNumValue("saturation"));
+        shader.setFloat("bloomStrength", engine.getNumValue("bloom_strength"));
+        shader.setFloat("gamma", engine.getNumValue("gamma"));
+        shader.setInt("useHDR", engine.getIO("hdr") ? 1:0);
+
         glActiveTexture(GL_TEXTURE0);
-        glBindVertexArray(quadVAO);
         glBindTexture(GL_TEXTURE_2D, colorTexture);
+        shader.setInt("screenTexture", 0);
+
+        glActiveTexture(GL_TEXTURE1);
+        if (bloomTexture != -1)  {
+            glBindTexture(GL_TEXTURE_2D, bloomTexture);
+            shader.setInt("useBloom", 1);
+        } else {
+            glBindTexture(GL_TEXTURE_2D, 0);
+            shader.setInt("useBloom", -1);
+
+        }
+        shader.setInt("bloomBlur", 1);
+
+        glBindVertexArray(quadVAO);
         glDrawArrays(GL_TRIANGLES, 0, 6);
         glBindVertexArray(0);
     }
@@ -83,7 +104,9 @@ public class PostProcessor {
 
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         glBindTexture(GL_TEXTURE_2D, colorTexture);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, 0);
+        if (engine.getIO("hdr")) {
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+        } else glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, 0);
         glBindRenderbuffer(GL_RENDERBUFFER, rbo);
         glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -96,4 +119,7 @@ public class PostProcessor {
         glDeleteBuffers(quadVBO);
         glDeleteVertexArrays(quadVAO);
     }
+
+    public int getColorTexture() {return colorTexture;}
+    public int getQuadVAO() {return quadVAO;}
 }

@@ -9,18 +9,14 @@ import java.nio.charset.StandardCharsets;
 
 public class Utils {
     public static float toNDC(float value, String type, Engine engine) {
-        switch (type) {
-            case "x":
-                return (value / engine.windowWidth) * 2f - 1f;
-            case "y":
-                return 1f - (value / engine.windowHeight) * 2f;
-            case "w":
-                return (value / engine.windowWidth) * 2f;
-            case "h":
-                return (value / engine.windowHeight) * 2f;
-            default:
-                throw new IllegalArgumentException("Invalid type: " + type);
-        }
+        return switch (type) {
+            case "x" -> (value / engine.windowWidth) * 2f - 1f;
+            case "y" -> 1f - (value / engine.windowHeight) * 2f;
+            case "w" -> (value / engine.windowWidth) * 2f;
+            case "h" -> (value / engine.windowHeight) * 2f;
+            case "c" -> value * 255;
+            default -> throw new IllegalArgumentException("Invalid type: " + type);
+        };
     }
 
     public static String readFile(String path) {

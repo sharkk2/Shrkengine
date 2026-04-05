@@ -67,31 +67,26 @@ public class Quad extends Entity3D {
                         (float)Math.toRadians(angleY),
                         (float)Math.toRadians(angleZ))
                 .scale(w, h, d);
+        computeBounds(vertices);
     }
 
     @Override
     public boolean doRender() {
         if (!alive) return false;
         if (!camera.inFrustum(this)) {return false;}
+        if (!visible) return false;
+
         shader.use();
         glBindVertexArray(vao);
 
         Camera camera = engine.getCamera();
         Matrix4f projection = camera.getProjectionMatrix();
         Matrix4f view = camera.getViewMatrix();
-        model = new Matrix4f()
-                .translate(x, y, z)
-                .rotateXYZ((float)Math.toRadians(angleX),
-                        (float)Math.toRadians(angleY),
-                        (float)Math.toRadians(angleZ))
-                .scale(w, h, d);
-
-
 
         shader.setMat4("model", model);
         shader.setMat4("projection", projection);
         shader.setMat4("view", view);
-        shader.setVec4("color", getColor());
+        shader.setVec4("color", getColorRGBA());
         shader.setInt("useInstancing", 0);
         shader.setInt("atlasSize", engine.getTextureLoader().getAtlasSize());
         shader.setInt("textureIndex", textureNum);
@@ -102,9 +97,11 @@ public class Quad extends Entity3D {
         shader.setVec3("material.ambient", material.ambient);
         shader.setVec3("material.diffuse", material.diffuse);
         shader.setVec3("material.specular", material.specular);
+        shader.setVec3("material.emissive", material.emissive);
         shader.setFloat("material.shininess", material.shininess);
         shader.setFloat("material.applyLight", material.applyLight? 1:0);
-        Scene currentScene = engine.getWorld().getCurrentScene();;
+        shader.setFloat("material.rainbowEffect", material.rainbowEffect? 1:0);
+        Scene currentScene = engine.getWorld().getCurrentScene();
         shader.setVec3("dirLight.direction", currentScene.globalSceneLight.direction);
         shader.setVec3("dirLight.color", currentScene.globalSceneLight.color);
         shader.setVec3("dirLight.ambient", currentScene.globalSceneLight.ambient);
@@ -170,6 +167,7 @@ public class Quad extends Entity3D {
             initialized = false;
         }
     }
+
     public int getTextureID() {return textureID;}
     public int getTextureNum() {return textureNum;}
     public int getVboUV() {return vboUV;}

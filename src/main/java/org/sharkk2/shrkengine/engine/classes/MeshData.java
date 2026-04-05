@@ -8,9 +8,11 @@ public class MeshData {
     public final int vboUVs;
     public final int ebo;
     public final int indexCount;
+    public float[] positions;
 
     public MeshData(float[] positions, float[] normals, float[] uvs, int[] indices) {
         this.indexCount = indices.length;
+        this.positions = positions;
 
         vao = glGenVertexArrays();
         glBindVertexArray(vao);

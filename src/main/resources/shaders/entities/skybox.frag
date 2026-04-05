@@ -24,7 +24,7 @@ void main() {
 
     if (useDayNightCycle == 1) {
         float dayBlend = clamp(sunHeight * 2.0, 0.0, 1.0);
-        float sunsetBlend = clamp(1.0 - abs(sunHeight) * 3.0, 0.0, 1.0);
+        float sunsetBlend = clamp(1.0 - abs(sunHeight) * 2, 0.0, 1.0);
 
         vec3 dayZenith = vec3(0.08, 0.15, 0.45);
         vec3 dayMid = vec3(0.25, 0.52, 0.85);
@@ -69,13 +69,13 @@ void main() {
     float limbDarken = sqrt(max(1.0 - pow(sunAngle / discRadius, 2.0), 0.0));
     limbDarken = mix(0.75, 1.0, limbDarken);
     vec3 sunDiscColor = useDayNightCycle == 1 ? mix(vec3(1.0, 0.4, 0.1), vec3(1.0, 0.97, 0.88), clamp(sunHeight * 3.0, 0.0, 1.0)):vec3(1.0, 0.97, 0.88);
-    sunDiscColor *= limbDarken;
+    //sunDiscColor *= limbDarken;
 
     float innerCorona = exp(-sunAngle * 80.0) * 0.9;
     float outerGlow = exp(-sunAngle * 12.0) * 0.4;
     float mie = pow(max(sunDot, 0.0), 6.0) * 0.6;
 
-    vec3 innerCoronaColor = vec3(1.0, 0.95, 0.80);
+    vec3 innerCoronaColor = vec3(8,7,5.5);
     vec3 glowColor = vec3(1.0, 0.85, 0.55);
     vec3 mieColor  = vec3(1.0, 0.75, 0.45);
 
@@ -83,13 +83,56 @@ void main() {
     sunContrib += mieColor * mie;
     sunContrib += glowColor * outerGlow;
     sunContrib += innerCoronaColor * innerCorona;
-    sunContrib += sunDiscColor * discEdge;
+    sunContrib += sunDiscColor * discEdge * 20;
     sunContrib *= sunVisibility;
 
-    vec3 finalColor = skyColor + sunContrib;
 
-    finalColor = finalColor / (finalColor + vec3(0.6));
-    finalColor = pow(finalColor, vec3(1.0 / 2.2));
+    // Hash for pseudo-random stars
+    vec3 starDir = normalize(TexDir);
+    vec3 absDir = abs(starDir);
+    vec2 faceUV;
+    float faceID;
+
+    if (absDir.x >= absDir.y && absDir.x >= absDir.z) {
+        faceUV = starDir.yz / absDir.x;
+        faceID = starDir.x > 0.0 ? 0.0 : 1.0;
+    } else if (absDir.y >= absDir.x && absDir.y >= absDir.z) {
+        faceUV = starDir.xz / absDir.y;
+        faceID = starDir.y > 0.0 ? 2.0 : 3.0;
+    } else {
+        faceUV = starDir.xy / absDir.z;
+        faceID = starDir.z > 0.0 ? 4.0 : 5.0;
+    }
+
+    vec2 cell2D = floor(faceUV * 40.0);
+    vec3 cellSeed = vec3(cell2D, faceID);
+
+    float rand  = fract(sin(dot(cellSeed, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+    float rand2 = fract(sin(dot(cellSeed, vec3(269.5, 183.3, 246.1))) * 43758.5453);
+    float rand3 = fract(sin(dot(cellSeed, vec3(113.5, 271.9, 124.6))) * 43758.5453);
+
+    float starBrightness = 0.0;
+    if (rand > 0.95) {
+        vec2 cellUV = fract(faceUV * 40.0) - 0.5;
+        cellUV -= (vec2(rand2, rand3) - 0.5) * 0.6;
+        float dist = length(cellUV);
+        float size = mix(0.04, 0.12, rand2);
+        starBrightness = smoothstep(size, size * 0.3, dist);
+        starBrightness *= mix(0.4, 1.0, rand3);
+    }
+
+    float twinkle = sin(rand * 63.7 + rand2 * 91.3) * 0.5 + 0.5;
+    starBrightness *= mix(0.7, 1.0, twinkle);
+
+    float starVisibility = useDayNightCycle == 1 ? clamp(-sunHeight * 4.0, 0.0, 1.0) : 0.0;
+    starVisibility *= clamp(dir.y * 10.0, 0.0, 1.0);
+    vec3 starColor = mix(vec3(0.8, 0.9, 1.0), vec3(1.0, 0.85, 0.7), rand2);
+    vec3 starContrib = starColor * starBrightness * 2.5 * starVisibility;
+
+    vec3 finalColor = skyColor + sunContrib + starContrib;
+
+   // finalColor = finalColor / (finalColor + vec3(0.6));
+    //finalColor = pow(finalColor, vec3(1.0 / 2));
 
     FragColor = vec4(finalColor, 1.0);
 }

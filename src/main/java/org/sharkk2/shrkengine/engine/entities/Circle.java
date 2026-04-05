@@ -119,23 +119,27 @@ public class Circle extends Entity2D {
 
     @Override
     public void update(Runnable action) {
-        if (action != null) action.run();
-        if (shouldBounce) makeItBounce();
+        if (action != null) {action.run();}
+        else {
+            if (shouldBounce) makeItBounce();
+        }
     }
 
     @Override
     public void handleInput(Runnable action) {
-        if (action != null) action.run();
-        if (Input.isKeyDown(GLFW_KEY_W)) y -= speed * engine.getDeltaTime();
-        if (Input.isKeyDown(GLFW_KEY_S)) y += speed * engine.getDeltaTime();
-        if (Input.isKeyDown(GLFW_KEY_D)) x += speed * engine.getDeltaTime();
-        if (Input.isKeyDown(GLFW_KEY_A)) x -= speed * engine.getDeltaTime();
+        if (action != null) { action.run(); }
+        else {
+            if (Input.isKeyDown(GLFW_KEY_W)) y -= speed * engine.getDeltaTime();
+            if (Input.isKeyDown(GLFW_KEY_S)) y += speed * engine.getDeltaTime();
+            if (Input.isKeyDown(GLFW_KEY_D)) x += speed * engine.getDeltaTime();
+            if (Input.isKeyDown(GLFW_KEY_A)) x -= speed * engine.getDeltaTime();
 
-        float halfR = radius;
-        if (x - halfR < 0f) x = halfR;
-        if (x + halfR > engine.windowWidth) x = engine.windowWidth - halfR;
-        if (y - halfR < 0f) y = halfR;
-        if (y + halfR > engine.windowHeight) y = engine.windowHeight - halfR;
+            float halfR = radius;
+            if (x - halfR < 0f) x = halfR;
+            if (x + halfR > engine.windowWidth) x = engine.windowWidth - halfR;
+            if (y - halfR < 0f) y = halfR;
+            if (y + halfR > engine.windowHeight) y = engine.windowHeight - halfR;
+        }
     }
 
     @Override

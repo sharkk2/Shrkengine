@@ -30,7 +30,7 @@ public class LightManager {
             this.intensity = intensity;
         }
 
-        public void visualize(Engine engine) {
+        public void visualize(Engine engine) { // quads here can be cached
             if (!visualized) {
                 quad = new Quad(engine);
                 quad.applyTexture(5);
@@ -47,12 +47,13 @@ public class LightManager {
                 float dz = camPos.z - quad.getZ();
                 float yaw = (float)Math.toDegrees(Math.atan2(dx, dz)) + 180f;
 
-                quad.setAngles(0, yaw, 0);
+                quad.setRotation(0, yaw, 0);
             });
 
         }
 
         public void disableVisualization() {if (quad != null) {quad.destroy(); quad = null; visualized = false;}}
+
     }
 
 
@@ -78,23 +79,29 @@ public class LightManager {
 
     public List<PointLight> getPointLights() {return pointLights;}
     public void removePointLight(PointLight light) {pointLights.remove(light);}
+    public PointLight removePointLight(int id) {
+        pointLights.removeIf(light -> light.id == id);
+        return null;
+    }
+
     public void destroyAll() {
         pointLights.clear();
     }
 
 
     public static class ShadowMap {
-        public static final int SHADOW_WIDTH = 2048, SHADOW_HEIGHT = 2048;
+        public static final int SHADOW_WIDTH = 4096, SHADOW_HEIGHT = 4096;
         public int fbo;
         public int depthTexture;
 
         public ShadowMap() {
             depthTexture = glGenTextures();
             glBindTexture(GL_TEXTURE_2D, depthTexture);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT,
-                    0, GL_DEPTH_COMPONENT, GL_FLOAT, (ByteBuffer) null);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, (ByteBuffer) null);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LESS);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
             float[] border = {1.0f, 1.0f, 1.0f, 1.0f};

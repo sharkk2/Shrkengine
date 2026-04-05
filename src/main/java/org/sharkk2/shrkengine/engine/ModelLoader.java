@@ -1,9 +1,11 @@
 package org.sharkk2.shrkengine.engine;
 
 import org.joml.Matrix4f;
+import org.joml.Vector3f;
 import org.lwjgl.assimp.*;
 import org.lwjgl.system.MemoryStack;
 import org.sharkk2.shrkengine.engine.classes.MeshData;
+import org.sharkk2.shrkengine.engine.classes.Model;
 import org.sharkk2.shrkengine.engine.entities.Mesh;
 
 import java.nio.ByteBuffer;
@@ -17,7 +19,7 @@ import static org.lwjgl.stb.STBImage.*;
 
 public class ModelLoader {
 
-    private record CachedMesh(MeshData data, List<Mesh.MeshTexture> textures, Matrix4f nodeTransform, float[] ambient, float[] diffuse, float[] specular, float shininess) {}
+    private record CachedMesh(MeshData data, List<Mesh.MeshTexture> textures, Matrix4f nodeTransform, Vector3f ambient, Vector3f diffuse, Vector3f specular, Vector3f emissive, float shininess) {}
 
     private final Engine engine;
     private String directory;
@@ -28,9 +30,13 @@ public class ModelLoader {
         this.engine = engine;
     }
 
-    public List<Mesh> loadModel(String path) {
+    public Model loadModel(String path) {
+        Model model = new Model(engine);
         if (modelCache.containsKey(path)) {
-            return instantiate(modelCache.get(path));
+            for (Mesh m : instantiate(modelCache.get(path))) {
+                model.addMesh(m);
+            }
+            return model;
         }
 
         int flags = aiProcess_Triangulate | aiProcess_GenSmoothNormals | aiProcess_JoinIdenticalVertices | aiProcess_OptimizeMeshes | aiProcess_CalcTangentSpace;
@@ -38,7 +44,7 @@ public class ModelLoader {
 
         if (aiScene == null || (aiScene.mFlags() & AI_SCENE_FLAGS_INCOMPLETE) != 0 || aiScene.mRootNode() == null) {
             System.err.println("[ModelLoader] Failed to load '" + path + "': " + aiGetErrorString());
-            return Collections.emptyList();
+            return null;
         }
 
         int lastSlash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
@@ -49,16 +55,20 @@ public class ModelLoader {
         aiReleaseImport(aiScene);
         modelCache.put(path, cached);
 
-        return instantiate(cached);
+        for (Mesh mesh : instantiate(cached)) {
+            model.addMesh(mesh);
+        }
+        return model;
     }
 
     private List<Mesh> instantiate(List<CachedMesh> cached) {
         List<Mesh> result = new ArrayList<>();
         for (CachedMesh c : cached) {
             Mesh mesh = new Mesh(engine, c.data(), c.textures(), c.nodeTransform(), false);
-            mesh.material.setAmbient(c.ambient()[0], c.ambient()[1], c.ambient()[2]);
-            mesh.material.setDiffuse(c.diffuse()[0], c.diffuse()[1], c.diffuse()[2]);
-            mesh.material.setSpecular(c.specular()[0], c.specular()[1], c.specular()[2]);
+            mesh.material.setAmbient(c.ambient());
+            mesh.material.setDiffuse(c.diffuse());
+            mesh.material.setSpecular(c.specular());
+            mesh.material.setEmissive(c.emissive());
             if (c.shininess() > 0) mesh.material.setShininess(c.shininess());
             result.add(mesh);
         }
@@ -138,9 +148,11 @@ public class ModelLoader {
         int[] indices = indexList.stream().mapToInt(Integer::intValue).toArray();
 
         List<Mesh.MeshTexture> textures = new ArrayList<>();
-        float[] ambient = {0, 0, 0};
-        float[] diffuse = {0, 0, 0};
-        float[] specular = {0, 0, 0};
+        Vector3f ambient = new Vector3f();
+        Vector3f diffuse = new Vector3f();
+        Vector3f specular = new Vector3f();
+        Vector3f emissive = new Vector3f();
+
         float shininess = 0;
         int matIndex = aiMesh.mMaterialIndex();
         if (matIndex >= 0 && aiScene.mMaterials() != null) {
@@ -150,25 +162,36 @@ public class ModelLoader {
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 AIColor4D color = AIColor4D.malloc(stack);
                 if (aiGetMaterialColor(aiMaterial, AI_MATKEY_COLOR_AMBIENT, aiTextureType_NONE, 0, color) == aiReturn_SUCCESS) {
-                    ambient = new float[]{color.r(), color.g(), color.b()};
+                    ambient.set(color.r(), color.g(), color.b());
                 }
                 if (aiGetMaterialColor(aiMaterial, AI_MATKEY_COLOR_DIFFUSE, aiTextureType_NONE, 0, color) == aiReturn_SUCCESS) {
-                    diffuse = new float[]{color.r(), color.g(), color.b()};
+                    diffuse.set(color.r(), color.g(), color.b());
                 }
                 if (aiGetMaterialColor(aiMaterial, AI_MATKEY_COLOR_SPECULAR, aiTextureType_NONE, 0, color) == aiReturn_SUCCESS) {
-                    specular = new float[]{color.r(), color.g(), color.b()};
+                    specular.set(color.r(), color.g(), color.b());
                 }
+                if (aiGetMaterialColor(aiMaterial, AI_MATKEY_COLOR_EMISSIVE, aiTextureType_NONE, 0, color) == aiReturn_SUCCESS) {
+                    emissive.set(color.r(), color.g(), color.b());
+                }
+
                 FloatBuffer shininessOut = stack.mallocFloat(1);
                 IntBuffer maxOut = stack.mallocInt(1);
                 maxOut.put(0, 1);
                 if (aiGetMaterialFloatArray(aiMaterial, AI_MATKEY_SHININESS, aiTextureType_NONE, 0, shininessOut, maxOut) == aiReturn_SUCCESS) {
                     shininess = shininessOut.get(0);
                 }
+                FloatBuffer emissiveStrength = stack.mallocFloat(1);
+                maxOut.put(0, 1);
+                float emissiveFactor = 1.0f;
+                if (aiGetMaterialFloatArray(aiMaterial, AI_MATKEY_EMISSIVE_INTENSITY, aiTextureType_NONE, 0, emissiveStrength, maxOut) == aiReturn_SUCCESS) {
+                    emissiveFactor = emissiveStrength.get(0);
+                }
+                emissive.mul(emissiveFactor);
             }
         }
 
         MeshData data = new MeshData(positions, normals, uvs, indices);
-        return new CachedMesh(data, textures, nodeTransform, ambient, diffuse, specular, shininess);
+        return new CachedMesh(data, textures, nodeTransform, ambient, diffuse, specular, emissive, shininess);
     }
 
     private List<Mesh.MeshTexture> loadMaterialTextures(AIMaterial material, int texType, String typeName, AIScene aiScene) {

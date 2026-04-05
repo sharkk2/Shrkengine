@@ -11,6 +11,7 @@ import java.nio.FloatBuffer;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.lwjgl.opengl.GL33.*;
 import static org.lwjgl.stb.STBTruetype.stbtt_GetBakedQuad;
@@ -20,6 +21,10 @@ public class TextManager {
     private final ShaderLoader.Shader shader;
     private final FontLoader.Font font;
     private final Engine engine;
+    private static final AtomicInteger textIDCounter = new AtomicInteger(0);
+    private static final AtomicInteger groupIDCounter = new AtomicInteger(0);
+
+
     private Map<Integer, TextGroup> groups = new HashMap<>();
     public TextManager(Engine engine, FontLoader.Font font) {
         this.shader = ShaderLoader.get("shaders/ui/text.vert", "shaders/ui/text.frag");
@@ -72,7 +77,7 @@ public class TextManager {
         public String content;
         public boolean shadowed = true;
         public Text(float x, float y, float size, float r, float g, float b, float a, String content) {
-            this.id = (int)(Math.random() * 9999);
+            this.id = textIDCounter.getAndIncrement();
             this.x = x;
             this.y = y;
             this.size = size;
@@ -90,7 +95,7 @@ public class TextManager {
         private final Map<Integer, Text> texts = new HashMap<>();
         private int vao = -1;
         private int vbo = -1;
-        public int groupID = (int)(Math.random() * 10000);
+        public int groupID = groupIDCounter.getAndIncrement();
         public void addText(Text text) {
             texts.put(text.id, text);
         }
