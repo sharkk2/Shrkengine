@@ -12,8 +12,9 @@ import org.sharkk2.shrkengine.engine.classes.Scene;
 import static org.lwjgl.glfw.GLFW.glfwGetTime;
 import static org.lwjgl.opengl.GL33.*;
 
-public class Cube extends Entity3D {
-    // behold, the fattest constructor and global variables
+// todo: fix lighting for spheres and instance them
+
+public class Sphere extends Entity3D {
     private static int vao;
     private static int vboVertices;
     private static int vboUV;
@@ -26,82 +27,99 @@ public class Cube extends Entity3D {
     private float textureScale = -1f;
     private int ntextureID = -1;
 
-    private boolean fFront = false;
-    private boolean fBack = false;
-    private boolean fLeft = false;
-    private boolean fRight = false;
-    private boolean fTop = false;
-    private boolean fBottom = false;
-    public static final float[] vertices = { // we map the cube on the 3D plane this time, where its XYZ
-            // Front face
-            -0.5f, -0.5f,  0.5f,
-            0.5f, -0.5f,  0.5f,
-            0.5f,  0.5f,  0.5f,
-            0.5f,  0.5f,  0.5f,
-            -0.5f,  0.5f,  0.5f,
-            -0.5f, -0.5f,  0.5f,
+    private static final int STACKS = 16;
+    private static final int SECTORS = 32;
+    private static final int VERTEX_COUNT = STACKS * SECTORS * 6;
 
-            // Back face
-            -0.5f, -0.5f, -0.5f,
-            -0.5f,  0.5f, -0.5f,
-            0.5f,  0.5f, -0.5f,
-            0.5f,  0.5f, -0.5f,
-            0.5f, -0.5f, -0.5f,
-            -0.5f, -0.5f, -0.5f,
+    public static final float[] vertices;
+    public static final float[] normals;
+    public static final float[] uvs;
 
-            // Left face
-            -0.5f, -0.5f, -0.5f,
-            -0.5f, -0.5f,  0.5f,
-            -0.5f,  0.5f,  0.5f,
-            -0.5f,  0.5f,  0.5f,
-            -0.5f,  0.5f, -0.5f,
-            -0.5f, -0.5f, -0.5f,
+    static {  // this static is ai gen code based on https://www.songho.ca/opengl/gl_sphere.html
+        float[] verts = new float[VERTEX_COUNT * 3];
+        float[] norms = new float[VERTEX_COUNT * 3];
+        float[] uvsArr = new float[VERTEX_COUNT * 2];
+        int vi = 0, ni = 0, ui = 0;
+        for (int i = 0; i < STACKS; i++) {
+            float phi1 = (float)(Math.PI / 2 - i * Math.PI / STACKS);
+            float phi2 = (float)(Math.PI / 2 - (i + 1) * Math.PI / STACKS);
+            for (int j = 0; j < SECTORS; j++) {
+                float theta1 = (float)(j * 2 * Math.PI / SECTORS);
+                float theta2 = (float)((j + 1) * 2 * Math.PI / SECTORS);
 
-            // Right face
-            0.5f, -0.5f, -0.5f,
-            0.5f,  0.5f, -0.5f,
-            0.5f,  0.5f,  0.5f,
-            0.5f,  0.5f,  0.5f,
-            0.5f, -0.5f,  0.5f,
-            0.5f, -0.5f, -0.5f,
+                float x1 = (float)(Math.cos(phi1) * Math.cos(theta1));
+                float y1 = (float)Math.sin(phi1);
+                float z1 = (float)(Math.cos(phi1) * Math.sin(theta1));
 
-            // Top face
-            -0.5f,  0.5f, -0.5f,
-            -0.5f,  0.5f,  0.5f,
-            0.5f,  0.5f,  0.5f,
-            0.5f,  0.5f,  0.5f,
-            0.5f,  0.5f, -0.5f,
-            -0.5f,  0.5f, -0.5f,
+                float x2 = (float)(Math.cos(phi1) * Math.cos(theta2));
+                float y2 = (float)Math.sin(phi1);
+                float z2 = (float)(Math.cos(phi1) * Math.sin(theta2));
 
-            // Bottom face
-            -0.5f, -0.5f, -0.5f,
-            0.5f, -0.5f, -0.5f,
-            0.5f, -0.5f,  0.5f,
-            0.5f, -0.5f,  0.5f,
-            -0.5f, -0.5f,  0.5f,
-            -0.5f, -0.5f, -0.5f,
-    };
+                float x3 = (float)(Math.cos(phi2) * Math.cos(theta1));
+                float y3 = (float)Math.sin(phi2);
+                float z3 = (float)(Math.cos(phi2) * Math.sin(theta1));
 
-    public static final float[] normals = {
-            0,0,1, 0,0,1, 0,0,1, 0,0,1, 0,0,1, 0,0,1,
-            0,0,-1, 0,0,-1, 0,0,-1, 0,0,-1, 0,0,-1, 0,0,-1,
-            -1,0,0, -1,0,0, -1,0,0, -1,0,0, -1,0,0, -1,0,0,
-            1,0,0, 1,0,0, 1,0,0, 1,0,0, 1,0,0, 1,0,0,
-            0,1,0, 0,1,0, 0,1,0, 0,1,0, 0,1,0, 0,1,0,
-            0,-1,0, 0,-1,0, 0,-1,0, 0,-1,0, 0,-1,0, 0,-1,0
-    };
+                float x4 = (float)(Math.cos(phi2) * Math.cos(theta2));
+                float y4 = (float)Math.sin(phi2);
+                float z4 = (float)(Math.cos(phi2) * Math.sin(theta2));
 
-    public static final float[] uvs = {
-            0,0, 1,0, 1,1, 1,1, 0,1, 0,0,
-            0,0, 1,0, 1,1, 1,1, 0,1, 0,0,
-            0,0, 1,0, 1,1, 1,1, 0,1, 0,0,
-            0,0, 1,0, 1,1, 1,1, 0,1, 0,0,
-            0,0, 1,0, 1,1, 1,1, 0,1, 0,0,
-            0,0, 1,0, 1,1, 1,1, 0,1, 0,0
-    };
 
-    public Cube(Engine engine) {
-        // everything else is mostly the same as in every other entity lol
+                float len1 = (float)Math.sqrt(x1*x1 + y1*y1 + z1*z1);
+                x1 /= len1;
+                y1 /= len1;
+                z1 /= len1;
+
+                float len2 = (float)Math.sqrt(x2*x2 + y2*y2 + z2*z2);
+                x2 /= len2;
+                y2 /= len2;
+                z2 /= len2;
+
+                float len3 = (float)Math.sqrt(x3*x3 + y3*y3 + z3*z3);
+                x3 /= len3;
+                y3 /= len3;
+                z3 /= len3;
+
+                float len4 = (float)Math.sqrt(x4*x4 + y4*y4 + z4*z4);
+                x4 /= len4;
+                y4 /= len4;
+                z4 /= len4;
+
+
+                float u1 = (float)(theta1 / (2 * Math.PI));
+                float u2 = (float)(theta2 / (2 * Math.PI));
+                float v1 = (float)(phi1 / Math.PI + 0.5f);
+                float v2 = (float)(phi2 / Math.PI + 0.5f);
+
+                // Triangle 1: v1, v3, v2
+                verts[vi++] = x1; verts[vi++] = y1; verts[vi++] = z1;
+                verts[vi++] = x3; verts[vi++] = y3; verts[vi++] = z3;
+                verts[vi++] = x2; verts[vi++] = y2; verts[vi++] = z2;
+                norms[ni++] = x1; norms[ni++] = y1; norms[ni++] = z1;
+                norms[ni++] = x3; norms[ni++] = y3; norms[ni++] = z3;
+                norms[ni++] = x2; norms[ni++] = y2; norms[ni++] = z2;
+                uvsArr[ui++] = u1; uvsArr[ui++] = v1;
+                uvsArr[ui++] = u1; uvsArr[ui++] = v2;
+                uvsArr[ui++] = u2; uvsArr[ui++] = v1;
+
+                // Triangle 2: v2, v3, v4
+                verts[vi++] = x2; verts[vi++] = y2; verts[vi++] = z2;
+                verts[vi++] = x3; verts[vi++] = y3; verts[vi++] = z3;
+                verts[vi++] = x4; verts[vi++] = y4; verts[vi++] = z4;
+                norms[ni++] = x2; norms[ni++] = y2; norms[ni++] = z2;
+                norms[ni++] = x3; norms[ni++] = y3; norms[ni++] = z3;
+                norms[ni++] = x4; norms[ni++] = y4; norms[ni++] = z4;
+                uvsArr[ui++] = u2; uvsArr[ui++] = v1;
+                uvsArr[ui++] = u1; uvsArr[ui++] = v2;
+                uvsArr[ui++] = u2; uvsArr[ui++] = v2;
+            }
+        }
+
+        vertices = verts;
+        normals = norms;
+        uvs = uvsArr;
+    }
+
+    public Sphere(Engine engine) {
         super(engine);
         camera = engine.getCamera();
         if (!initialized) {
@@ -222,18 +240,10 @@ public class Cube extends Entity3D {
         }
 
         engine.onEntity3DRender(this);
-
-        if (fFront && fBack && fLeft && fRight && fTop && fBottom) {
-            return false;
-        }
-
-        glEnable(GL_CULL_FACE);
-        glCullFace(GL_BACK);
-        glFrontFace(GL_CCW);
-        glDrawArrays(GL_TRIANGLES, 0, 36);
-        glDisable(GL_CULL_FACE);
+        glDrawArrays(GL_TRIANGLES, 0, VERTEX_COUNT);
         return true;
     }
+
 
     @Override
     public void handleInput(Runnable action) {
@@ -243,7 +253,6 @@ public class Cube extends Entity3D {
     @Override
     public void update(Runnable action) {
         if (action != null) action.run();
-
     }
 
     @Override
@@ -264,17 +273,6 @@ public class Cube extends Entity3D {
     @Override
     protected void onDestroy() {}
 
-
-    public void checkNeighbours() {
-        Scene scene = engine.getWorld().getCurrentScene();
-        fFront = scene.getEntityAt(x, y, z + 1, false) instanceof Cube;
-        fBack = scene.getEntityAt(x, y, z - 1, false) instanceof Cube;
-        fLeft = scene.getEntityAt(x - 1, y, z, false) instanceof Cube;
-        fRight = scene.getEntityAt(x + 1, y, z, false) instanceof Cube;
-        fTop = scene.getEntityAt(x, y + 1, z, false) instanceof Cube;
-        fBottom = scene.getEntityAt(x, y - 1, z, false) instanceof Cube;
-    }
-
     @Override
     public void cleanup() {
         glDeleteBuffers(vboUV);
@@ -286,21 +284,17 @@ public class Cube extends Entity3D {
         }
     }
 
-
     public int getTextureID() {return textureID;}
     public int getNormalTextureID() {return ntextureID;}
     public int getTextureNum() {return textureNum;}
     public int getVboUV() {return vboUV;}
     public float[] getUVs() {return uvs;}
-    public boolean[] getSurroundingChecks() {
-        return new boolean[]{fFront, fBack, fLeft, fRight, fTop, fBottom};
-    }
+
     public void setTextureScale(float v) {this.textureScale = getWidth() / v;}
     public int getVao() {return vao;}
 
-
-    public Cube clone() {
-        Cube clone = new Cube(engine);
+    public Sphere clone() {
+        Sphere clone = new Sphere(engine);
         clone.setPosition(getX(), getY(), getZ());
         clone.material.setAmbient(material.ambient);
         clone.material.setEmissive(material.emissive);
@@ -322,5 +316,4 @@ public class Cube extends Entity3D {
         clone.setTextureScale(textureScale);
         return clone;
     }
-
 }

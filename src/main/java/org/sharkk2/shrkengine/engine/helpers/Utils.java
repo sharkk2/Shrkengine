@@ -3,11 +3,20 @@ package org.sharkk2.shrkengine.engine.helpers;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.sharkk2.shrkengine.engine.Engine;
+
+import javax.sound.sampled.AudioFormat;
+import javax.sound.sampled.AudioInputStream;
+import javax.sound.sampled.AudioSystem;
+import java.io.File;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 
 
 public class Utils {
+    public record WavData(ByteBuffer buffer, int format, int channels, AudioFormat fmt) {}
+
     public static float toNDC(float value, String type, Engine engine) {
         return switch (type) {
             case "x" -> (value / engine.windowWidth) * 2f - 1f;
@@ -48,5 +57,29 @@ public class Utils {
     public static float smoothstep(float edge0, float edge1, float t) {
         t = Math.min(Math.max((t - edge0) / (edge1 - edge0), 0.0f), 1.0f);
         return t * t * (3.0f - 2.0f * t);
+    }
+
+    public static WavData loadWav(String path, boolean downmix) throws Exception {
+        AudioInputStream audio = AudioSystem.getAudioInputStream(new File(path));
+        AudioFormat fmt = audio.getFormat();
+        byte[] pcm = audio.readAllBytes();
+
+        if (fmt.getChannels() == 2 && downmix) {
+            byte[] mono = new byte[pcm.length / 2];
+            for (int i = 0, j = 0; i < pcm.length; i += 4, j += 2) {
+                short l = (short) ((pcm[i] & 0xFF) | (pcm[i+1] << 8));
+                short r = (short) ((pcm[i+2] & 0xFF) | (pcm[i+3] << 8));
+                mono[j+1] = (byte) (((l + r) / 2) >> 8);
+                mono[j] = (byte) (((l + r) / 2) & 0xFF);
+            }
+            pcm = mono;
+        }
+
+        int channels = (fmt.getChannels() == 2 && !downmix) ? 2 : 1;
+        int format = fmt.getSampleSizeInBits() == 8 ? 0x1100 : 0x1101;
+
+        ByteBuffer buf = ByteBuffer.allocateDirect(pcm.length).order(ByteOrder.LITTLE_ENDIAN);
+        buf.put(pcm).flip();
+        return new WavData(buf, format, channels, fmt);
     }
 }

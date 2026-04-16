@@ -3,6 +3,7 @@ package org.sharkk2.shrkengine.engine;
 import org.sharkk2.shrkengine.engine.classes.Entity2D;
 import org.sharkk2.shrkengine.engine.classes.Entity3D;
 import org.sharkk2.shrkengine.engine.classes.Scene;
+import org.sharkk2.shrkengine.engine.entities.Cube;
 import org.sharkk2.shrkengine.engine.ui.TextManager;
 
 import java.util.*;
@@ -11,9 +12,6 @@ import java.util.*;
 // TODO: Make sure ram is freed whenever a scene changes
 public class World {
     private final Engine engine;
-    private final List<Entity2D> screenEntities = new ArrayList<>();
-    private final List<Entity3D> worldEntities = new ArrayList<>();
-    private final Map<String, Entity3D> worldMap = new HashMap<>();
     private Scene currentScene;
 
     public World(Engine engine) {
@@ -31,6 +29,8 @@ public class World {
             engine.getModelLoader().cleanup();
             currentScene.destroy();
             engine.getLightManager().destroyAll();
+            engine.getTextureLoader().clearCache();
+            engine.getAudioManager().cleanupSources();
         }
         currentScene = scene;
         currentScene.load();
@@ -40,6 +40,7 @@ public class World {
 
     public int renderScene(boolean useInstancing) {
         currentScene.tick();
+        currentScene.processRemovals();
         return engine.getRenderer().render(currentScene, useInstancing, true); //keep update models true or entire engine breaks
     }
 

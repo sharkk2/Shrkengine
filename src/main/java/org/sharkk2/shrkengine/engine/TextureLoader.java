@@ -8,6 +8,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.lwjgl.opengl.GL33.*;
 
@@ -16,6 +18,8 @@ public class TextureLoader {
     private final int textureID;
     private final int atlasSize;
     private final BufferedImage atlasImage;
+    private final Map<String, Integer> textureCache = new HashMap<>();
+
 
     public TextureLoader(String atlasPath, int atlasSize) {
         this.atlasSize = atlasSize;
@@ -139,5 +143,51 @@ public class TextureLoader {
         return texID;
     }
 
+    public int loadTexture(String path) {
+        if (textureCache.containsKey(path)) {
+            return textureCache.get(path);
+        }
 
+        try (InputStream in = TextureLoader.class.getClassLoader().getResourceAsStream(path)) {
+            if (in == null) throw new RuntimeException("Failed to load texture: " + path);
+
+            BufferedImage image = ImageIO.read(in);
+            int width = image.getWidth();
+            int height = image.getHeight();
+            int[] pixels = new int[width * height];
+            image.getRGB(0, 0, width, height, pixels, 0, width);
+            ByteBuffer buffer = BufferUtils.createByteBuffer(width * height * 4);
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    int pixel = pixels[y * width + x];
+                    buffer.put((byte) ((pixel >> 16) & 0xFF)); // R
+                    buffer.put((byte) ((pixel >> 8) & 0xFF));  // G
+                    buffer.put((byte) (pixel & 0xFF));         // B
+                    buffer.put((byte) ((pixel >> 24) & 0xFF)); // A
+                }
+            }
+            buffer.flip();
+
+            int texID = glGenTextures();
+            glBindTexture(GL_TEXTURE_2D, texID);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0,
+                    GL_RGBA, GL_UNSIGNED_BYTE, buffer);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+            textureCache.put(path, texID);
+            return texID;
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to load texture: " + path, e);
+        }
+    }
+
+    public void clearCache() {
+        for (int texID : textureCache.values()) {
+            glDeleteTextures(texID);
+        }
+        textureCache.clear();
+    }
 }

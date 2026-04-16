@@ -90,9 +90,7 @@ public class Mesh extends Entity3D {
         shader.setVec3("material.diffuse", material.diffuse);
         shader.setVec3("material.specular", material.specular);
         shader.setVec3("material.emissive", material.emissive);
-        shader.setFloat("material.shininess", material.shininess);
-        shader.setFloat("material.applyLight", material.applyLight? 1:0);
-        shader.setFloat("material.rainbowEffect", material.rainbowEffect? 1:0);
+        shader.setVec4("material.matProps", new Vector4f(material.shininess, material.applyLight?1:0, material.rainbowEffect?1:0, material.emissiveStrength));
 
         Scene currentScene = engine.getWorld().getCurrentScene();
         shader.setVec3("dirLight.direction", currentScene.globalSceneLight.direction);
@@ -116,30 +114,62 @@ public class Mesh extends Entity3D {
 
         boolean hasDiffuse = false;
         boolean hasSpecular = false;
-
-        for (MeshTexture tex : textures) {
+        boolean hasNormal = false;
+        boolean hasAO = false;
+        boolean hasMetalness = false;
+        boolean hasRoughness = false;
+        boolean hasOpacity = false;
+        int firstTexid = GL_TEXTURE0;
+        for (Mesh.MeshTexture tex : getTextures()) {
             if (tex.type.equals("texture_diffuse") && !hasDiffuse) {
-                glActiveTexture(GL_TEXTURE0);
+                glActiveTexture(firstTexid);
                 glBindTexture(GL_TEXTURE_2D, tex.id);
                 shader.setInt("texSampler", 0);
                 hasDiffuse = true;
             } else if (tex.type.equals("texture_specular") && !hasSpecular) {
-                glActiveTexture(GL_TEXTURE1);
+                glActiveTexture(firstTexid + 1);
                 glBindTexture(GL_TEXTURE_2D, tex.id);
                 shader.setInt("specularMap", 1);
                 hasSpecular = true;
+            }else if (tex.type.equals("texture_normal") && !hasNormal) {
+                glActiveTexture(firstTexid + 2);
+                glBindTexture(GL_TEXTURE_2D, tex.id);
+                shader.setInt("normalMap", 2);
+                hasNormal = true;
+            } else if (tex.type.equals("texture_ao") && !hasAO) {
+                glActiveTexture(firstTexid + 3);
+                glBindTexture(GL_TEXTURE_2D, tex.id);
+                shader.setInt("aoMap", 3);
+                hasAO = true;
+            } else if (tex.type.equals("texture_roughness") && !hasRoughness) {
+                glActiveTexture(firstTexid + 4);
+                glBindTexture(GL_TEXTURE_2D, tex.id);
+                shader.setInt("roughnessMap", 4);
+                hasRoughness = true;
+            } else if (tex.type.equals("texture_metalness") && !hasMetalness) {
+                glActiveTexture(firstTexid + 5);
+                glBindTexture(GL_TEXTURE_2D, tex.id);
+                shader.setInt("metalnessMap", 5);
+                hasMetalness = true;
+            } else if (tex.type.equals("texture_opacity") && !hasOpacity) {
+                glActiveTexture(firstTexid + 6);
+                glBindTexture(GL_TEXTURE_2D, tex.id);
+                shader.setInt("opacityMap", 6);
+                hasOpacity = true;
             }
         }
-
         shader.setInt("useTexture", hasDiffuse ? 1 : 0);
         shader.setInt("useSpecularMap", hasSpecular ? 1 : 0);
-        shader.setInt("atlasSize", 1);
-        shader.setInt("textureIndex", 0);
-        int shadowSlot = 2;
-        glActiveTexture(GL_TEXTURE0 + shadowSlot);
+        shader.setInt("useNormalMap", hasNormal ? 1: 0);
+        shader.setInt("useAOMap", hasAO ? 1:0);
+        shader.setInt("useOpacityMap", hasOpacity ? 1:0);
+        shader.setInt("useRoughnessMap", hasRoughness ? 1:0);
+        shader.setInt("useMetalMap", hasMetalness ? 1:0);
+
+        glActiveTexture(firstTexid + 7);
         glBindTexture(GL_TEXTURE_2D, currentScene.globalSceneLight.shadowMap.depthTexture);
-        shader.setInt("shadowMap", shadowSlot);
-        shader.setMat4("lightSpaceMatrix", currentScene.globalSceneLight.getLightSpace(camera));
+        shader.setInt("shadowMap", 7);
+        shader.setMat4("lightSpaceMatrix", currentScene.globalSceneLight.getLightSpace(engine));
 
         engine.onEntity3DRender(this);
 

@@ -1,10 +1,7 @@
 package org.sharkk2.shrkengine.game.scenes;
 
 import org.joml.Vector3f;
-import org.sharkk2.shrkengine.engine.Camera;
-import org.sharkk2.shrkengine.engine.Engine;
-import org.sharkk2.shrkengine.engine.Input;
-import org.sharkk2.shrkengine.engine.LightManager;
+import org.sharkk2.shrkengine.engine.*;
 import org.sharkk2.shrkengine.engine.classes.Entity2D;
 import org.sharkk2.shrkengine.engine.classes.Entity3D;
 import org.sharkk2.shrkengine.engine.classes.Scene;
@@ -46,7 +43,7 @@ public class MenuScene extends Scene {
     @Override
     public void tick() {
         //if (Input.isKeyDown(GLFW_KEY_ESCAPE)) System.exit(0);
-        if (Input.isKeyPressed(GLFW_KEY_ENTER) || Input.isKeyPressed(GLFW_KEY_RIGHT) || Input.isKeyPressed(GLFW_KEY_D)) {
+        if (Input.isKeyPressed(GLFW_KEY_ENTER) || Input.isKeyPressed(GLFW_KEY_RIGHT) || Input.isKeyPressed(GLFW_KEY_D) || Input.isButtonPressed(GLFW_GAMEPAD_BUTTON_DPAD_RIGHT) || Input.isButtonPressed(GLFW_GAMEPAD_BUTTON_CROSS)) {
             if (selected == 0) {
                 Quadrilateral quad = new Quadrilateral(engine);
                 quad.setColor(0,0,0,1);
@@ -72,15 +69,9 @@ public class MenuScene extends Scene {
             }
             return false;
         });
-        worldEntities.removeIf(e -> {
-            if (!e.isAlive()) {
-                worldEntityMap.remove(e.getID());
-                return true;
-            }
-            return false;
-        });
 
-        for (Entity3D entity : worldEntities) {
+
+        for (Entity3D entity : getWorldEntities()) {
             entity.handleInput(null);
             if (entity instanceof Cube) {
                 entity.update(() -> {
@@ -103,11 +94,11 @@ public class MenuScene extends Scene {
                 double currentTime = System.currentTimeMillis() / 1000.0;
                 entity.handleInput(() -> {
                     boolean moved = false;
-                    if ((Input.isKeyDown(GLFW_KEY_W) || Input.isKeyDown(GLFW_KEY_UP)) && currentTime - lastMoveTime > moveDelay) {
+                    if ((Input.getAxis(GLFW_GAMEPAD_AXIS_LEFT_Y, 0.15f) < 0 || Input.isKeyDown(GLFW_KEY_W) || Input.isKeyDown(GLFW_KEY_UP)|| Input.isButtonDown(GLFW_GAMEPAD_BUTTON_DPAD_UP)) && currentTime - lastMoveTime > moveDelay) {
                         selected = Math.max(0, selected - 1);
                         moved = true;
                     }
-                    if ((Input.isKeyDown(GLFW_KEY_S) || Input.isKeyDown(GLFW_KEY_DOWN)) && currentTime - lastMoveTime > moveDelay) {
+                    if ((Input.getAxis(GLFW_GAMEPAD_AXIS_LEFT_Y, 0.15f) > 0|| Input.isKeyDown(GLFW_KEY_S) || Input.isKeyDown(GLFW_KEY_DOWN) || Input.isButtonDown(GLFW_GAMEPAD_BUTTON_DPAD_DOWN)) && currentTime - lastMoveTime > moveDelay) {
                         selected = Math.min(buttons.size() - 1, selected + 1);
                         moved = true;
                     }
@@ -155,12 +146,15 @@ public class MenuScene extends Scene {
 
     @Override
     public void load() {
+
         camera.setPosition(10, 5, 10);
         camera.setPitch(-67);
         camera.setYaw(72);
         globalSceneLight.enable(false);
         camera.setViewLock(true);
         camera.setPositionlock(true);
+        engine.getAudioManager().playAudio(new AudioManager.Audio("maintheme", new Vector3f(), new Vector3f(), new Vector3f(), true, true, 1, 2, 1));
+
         int gridSize = 24;
         int gridHeight = 2;
         for (int i = 0; i < gridSize; i++) {
@@ -199,7 +193,7 @@ public class MenuScene extends Scene {
         tId = stext.id;
         textGroup.addText(stext);
         screenEntities.add(pointer);
-        for (Entity3D e : worldEntities) {
+        for (Entity3D e : getWorldEntities()) {
             if (e instanceof Cube) {
                 Cube c = (Cube) e;
                 c.checkNeighbours();

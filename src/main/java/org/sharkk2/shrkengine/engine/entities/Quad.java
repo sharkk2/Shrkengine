@@ -1,6 +1,7 @@
 package org.sharkk2.shrkengine.engine.entities;
 
 import org.joml.Matrix4f;
+import org.joml.Vector4f;
 import org.sharkk2.shrkengine.engine.Camera;
 import org.sharkk2.shrkengine.engine.Engine;
 import org.sharkk2.shrkengine.engine.LightManager;
@@ -19,7 +20,8 @@ public class Quad extends Entity3D {
     private static int vboNormals;
     private static boolean initialized = false;
     private int textureID = -1;
-    private int textureNum = 0;
+    private int ntextureID = -1;
+    private int textureNum = -1;
     private float textureScale = -1f;
     private final Camera camera;
 
@@ -98,9 +100,7 @@ public class Quad extends Entity3D {
         shader.setVec3("material.diffuse", material.diffuse);
         shader.setVec3("material.specular", material.specular);
         shader.setVec3("material.emissive", material.emissive);
-        shader.setFloat("material.shininess", material.shininess);
-        shader.setFloat("material.applyLight", material.applyLight? 1:0);
-        shader.setFloat("material.rainbowEffect", material.rainbowEffect? 1:0);
+        shader.setVec4("material.matProps", new Vector4f(material.shininess, material.applyLight?1:0, material.rainbowEffect?1:0, material.emissiveStrength));
         Scene currentScene = engine.getWorld().getCurrentScene();
         shader.setVec3("dirLight.direction", currentScene.globalSceneLight.direction);
         shader.setVec3("dirLight.color", currentScene.globalSceneLight.color);
@@ -113,6 +113,13 @@ public class Quad extends Entity3D {
         shader.setFloat("fog.density", currentScene.sceneFog.density);
         shader.setInt("fog.mode", currentScene.sceneFog.mode);
         shader.setInt("useSpecularMap", 0);
+        shader.setInt("useNormalMap", 0);
+        shader.setInt("useAOMap", 0);
+        shader.setInt("useOpacityMap", 0);
+        shader.setInt("useRoughnessMap", 0);
+        shader.setInt("useMetalMap", 0);
+        shader.setInt("useEmissiveMap", 0);
+
         shader.setFloat("textureScale", textureScale);
         for (int i = 0; i < engine.getLightManager().getPointLights().size(); i++) {
             LightManager.PointLight light = engine.getLightManager().getPointLights().get(i);
@@ -128,11 +135,23 @@ public class Quad extends Entity3D {
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, textureID);
             shader.setInt("texSampler", 0);
+            if (textureNum == -1) {
+                shader.setInt("textureIndex", 0);
+                shader.setInt("atlasSize", 1);
+            }
         }
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, currentScene.globalSceneLight.shadowMap.depthTexture);
         shader.setInt("shadowMap", 1);
-        shader.setMat4("lightSpaceMatrix", currentScene.globalSceneLight.getLightSpace(camera));
+        shader.setMat4("lightSpaceMatrix", currentScene.globalSceneLight.getLightSpace(engine));
+
+        boolean hasNormal = ntextureID != -1;
+        if (hasNormal) {
+            glActiveTexture(GL_TEXTURE2);
+            glBindTexture(GL_TEXTURE_2D, ntextureID);
+            shader.setInt("normalMap", 2);
+            shader.setInt("useNormalMap", 1);
+        }
 
         engine.onEntity3DRender(this);
 
@@ -151,6 +170,14 @@ public class Quad extends Entity3D {
         if (engine.getTextureLoader() == null) return;
         textureID = engine.getTextureLoader().getTextureID();
         textureNum = texNum;
+    }
+
+    public void applyTexture(String texPath, int type) {
+        if (engine.getTextureLoader() == null) return;
+        switch (type) {
+            case 0: textureID = engine.getTextureLoader().loadTexture(texPath); break;
+            case 1: ntextureID = engine.getTextureLoader().loadTexture(texPath);
+        }
     }
 
     @Override

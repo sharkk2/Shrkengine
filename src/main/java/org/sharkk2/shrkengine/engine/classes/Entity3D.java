@@ -115,14 +115,16 @@ public abstract class Entity3D {
         public boolean applyLight = true;
         public boolean rainbowEffect = false;
         public float shininess = 32.0f;
+        public float emissiveStrength = 1;
 
-        public Material set(float aR, float aG, float aB, float dR, float dG, float dB, float sR, float sG, float sB, float eR, float eG, float eB, float shininess, boolean applyLight) {
+        public Material set(float aR, float aG, float aB, float dR, float dG, float dB, float sR, float sG, float sB, float eR, float eG, float eB, float shininess, float emissiveStrength, boolean applyLight) {
             ambient.set(aR, aG, aB);
             diffuse.set(dR, dG, dB);
             specular.set(sR, sG, sB);
             emissive.set(eR, eG, eB);
             this.shininess = shininess;
             this.applyLight = applyLight;
+            this.emissiveStrength = 1;
             return this;
         }
 
@@ -131,9 +133,10 @@ public abstract class Entity3D {
             setDiffuse(0.8f,0.8f,0.8f);
             setSpecular(0.5f,0.5f,0.5f);
             setShininess(32);
-            setEmissive(1,1,1);
+            setEmissive(0,0,0);
             applyLight(true);
             setRainbowEffect(false);
+            setEmissiveStrength(1);
         }
 
         public void setAmbient(float r, float g, float b) {ambient = new Vector3f(r, g, b);}
@@ -144,6 +147,7 @@ public abstract class Entity3D {
         public void setSpecular(Vector3f v) {specular = new Vector3f(v);}
         public void setEmissive(Vector3f v) {emissive = new Vector3f(v);}
         public void setEmissive(float r, float g, float b) {emissive = new Vector3f(r, g, b); }
+        public void setEmissiveStrength(float v) {emissiveStrength=v;}
         public void setShininess(float s) {shininess = s;}
         public void applyLight(boolean v) {applyLight = v;}
         public void setRainbowEffect(boolean v) {rainbowEffect = v;}

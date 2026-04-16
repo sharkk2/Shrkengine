@@ -1,20 +1,22 @@
 package org.sharkk2.shrkengine.game.scenes;
 
 import org.joml.Vector3f;
-import org.sharkk2.shrkengine.engine.Camera;
-import org.sharkk2.shrkengine.engine.Engine;
-import org.sharkk2.shrkengine.engine.LightManager;
+import static org.lwjgl.glfw.GLFW.*;
+
+import org.sharkk2.shrkengine.engine.*;
 import org.sharkk2.shrkengine.engine.classes.Entity2D;
 import org.sharkk2.shrkengine.engine.classes.Entity3D;
 import org.sharkk2.shrkengine.engine.classes.Model;
 import org.sharkk2.shrkengine.engine.classes.Scene;
 import org.sharkk2.shrkengine.engine.entities.*;
+import org.sharkk2.shrkengine.engine.entities.particlesys.Particle;
+import org.sharkk2.shrkengine.engine.entities.particlesys.ParticleEmitter;
 import org.sharkk2.shrkengine.engine.ui.TextManager;
 
 import java.util.List;
 import java.util.Random;
+import java.util.Vector;
 
-import static org.lwjgl.glfw.GLFW.glfwGetTime;
 
 public class WorldScene extends Scene {
     private final Camera camera;
@@ -27,6 +29,10 @@ public class WorldScene extends Scene {
 
     @Override
     public void tick() {
+        if (Input.isGamepadConnected()) Input.setGamepadLight(sceneTime.getSkyColor(true));
+        if ((Input.isKeyPressed(GLFW_KEY_ENTER) || Input.isButtonPressed(GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER)) && camera.getLookingAt() != null && camera.getLookingAt().getID().equals("ps5_model")) {
+            engine.getWorld().setCurrentScene(new TestScene(engine, "testscene"));
+        }
         sceneTime.tick();
         screenEntities.removeIf(e -> {
             if (!e.isAlive()) {
@@ -35,15 +41,8 @@ public class WorldScene extends Scene {
             }
             return false;
         });
-        worldEntities.removeIf(e -> {
-            if (!e.isAlive()) {
-                worldEntityMap.remove(e.getID());
-                worldPosMap.remove(e.getX() +":"+e.getY()+":" +e.getZ());
-                return true;
-            }
-            return false;
-        });
-        for (Entity3D entity : worldEntities) {
+
+        for (Entity3D entity : getWorldEntities()) {
             entity.handleInput(null);
             if (entity instanceof Model e && entity.getID().equals("ps5_model")) {
                 entity.update(() -> {
@@ -67,6 +66,8 @@ public class WorldScene extends Scene {
                     al.color = new Vector3f(r,g,b);
                     e.getChild("ledStrip").attachLight(al);
                 });
+            } else {
+                entity.update(null);
             }
         }
         for (Entity2D entity : screenEntities) {
@@ -90,6 +91,7 @@ public class WorldScene extends Scene {
         camera.setPosition(10, 5, 10);
         camera.setPitch(-67);
         camera.setYaw(72);
+        engine.getAudioManager().playAudio(new AudioManager.Audio("theme", new Vector3f(), new Vector3f(), new Vector3f(), true, true, 1, 2, 1));
         int gridSize = 128;
         int spacing = 1;
         for (int i = -gridSize/2; i < gridSize / 2; i++) {
@@ -109,7 +111,6 @@ public class WorldScene extends Scene {
             }
         }
 
-        globalSceneLight.setAmbient(0.15f, 0.15f, 0.15f);
         //globalSceneLight.enable(false);
         LightManager lightManager = engine.getLightManager();
         LightManager.PointLight pl1 = new LightManager.PointLight(4, new Vector3f(13,4,17), new Vector3f(1,1,1),10);
@@ -165,6 +166,9 @@ public class WorldScene extends Scene {
         for (Mesh mesh : sharkModel.getChildren()) {
             mesh.material.setAmbient(0.25f,0.25f,0.25f);
         }
+        Vector3f dir = new Vector3f(0,0,1);
+        Vector3f vel = new Vector3f();
+        engine.getAudioManager().playAudio(new AudioManager.Audio("niggaAudio", sharkModel.getPosition(), dir, vel, false, true, 1, 10, 0.2f));
 
         Model backpackModel = engine.getModelLoader().loadModel("src/main/resources/models/backpack/backpack.obj");
         backpackModel.setID("backpack");
@@ -194,9 +198,10 @@ public class WorldScene extends Scene {
         ledStrip.material.setRainbowEffect(true);
         ledStrip.material.setEmissive(7,7,7);
         ledStrip.setID("ledStrip");
+        ledStrip.material.setEmissiveStrength(3);
         ledStrip.attachLight(new LightManager.PointLight(0.5f, ledStrip.getPosition(), ledStrip.getColorRGB(), 2));
         addWorldEntity(psModel);
-        for (Entity3D e : worldEntities) {
+        for (Entity3D e : getWorldEntities()) {
             if (e instanceof Cube c) {
                 c.checkNeighbours();
             }

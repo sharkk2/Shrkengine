@@ -1,5 +1,6 @@
 package org.sharkk2.shrkengine.engine;
 
+import org.joml.Vector3f;
 import org.lwjgl.opengl.GL;
 import static org.lwjgl.glfw.GLFW.*;
 import static org.lwjgl.opengl.GL33.*;
@@ -28,8 +29,8 @@ public class Engine {
     public void onEntity2DRender(Entity2D e) {}
 
     private long window;
-    private final HashMap<String, Boolean> ioMap = new HashMap<>();
-    private final HashMap<String, Float> numValueMap = new HashMap<>();
+    public final HashMap<String, Boolean> ioMap = new HashMap<>();
+    public final HashMap<String, Float> numValueMap = new HashMap<>();
 
     private TextureLoader textureLoader;
     private ModelLoader modelLoader;
@@ -41,8 +42,8 @@ public class Engine {
     private TextManager textManager;
     private LightManager lightManager;
     private PostProcessor postProcessor;
-    private Renderer renderer;
-    private final List<TextManager.Text> debugTexts = new ArrayList<>();
+    private NewRenderer renderer;
+    private AudioManager audioManager;
     private Map<Integer, List<Runnable>> preFrameActions = new HashMap<>();
     private Map<Integer, List<Runnable>> postFrameActions = new HashMap<>();
 
@@ -59,7 +60,7 @@ public class Engine {
 
     public Engine() {
         ioMap.put("wireframe", false);
-        ioMap.put("debug", false);
+        ioMap.put("debug", true);
         ioMap.put("use_instancing", true);
         ioMap.put("render_skybox", true);
         ioMap.put("frustum_culling", true);
@@ -71,15 +72,19 @@ public class Engine {
         numValueMap.put("saturation", 1.6f);
         numValueMap.put("bloom_strength", 1.1f);
         numValueMap.put("gamma", 1.2f);
+        numValueMap.put("shadow_distance", 40f);
     }
 
     public final void start() {
         if (!initialized) throw new RuntimeException("Engine is not initialized, run .initializeEngine() before starting.");
         gameLoop();
+        Input.setGamepadLight(new Vector3f(0,0,0));
+        Input.turnOffGamepadLight();
         onDestroy();
         ShaderLoader.destroyAll();
         postProcessor.destroy();
         bloom.cleanup();
+        audioManager.cleanup();
         glfwDestroyWindow(window);
         glfwTerminate();
     }
@@ -125,10 +130,11 @@ public class Engine {
         textureLoader = new TextureLoader(textureMapPath, textureMapSize);
         modelLoader = new ModelLoader(this);
         bloom = new Bloom(this);
-        renderer = new Renderer(this);
+        renderer = new NewRenderer(this);
         String[] f = {};
         skybox = new Skybox(this, f);
         lightManager = new LightManager();
+        audioManager = new AudioManager(this);
         world = new World(this);
         postProcessor = new PostProcessor(this);
         lastTime = System.nanoTime();
@@ -149,21 +155,6 @@ public class Engine {
             throw new RuntimeException(e);
         }
         textManager = new TextManager(this, font);
-        TextManager.TextGroup debugGroup = textManager.createTextGroup();
-        TextManager.Text fpsText = new TextManager.Text(30, 30, 22, 1, 1, 1, 1, "FPS: -1");
-        TextManager.Text dirText = new TextManager.Text(30, 50, 22, 1, 1, 1, 1, "Facing: -");
-        TextManager.Text expText = new TextManager.Text(30, 70, 22, 1, 1, 1, 1, "Exposure: -");
-        TextManager.Text satText = new TextManager.Text(30, 90, 22, 1, 1, 1, 1, "Saturation: -");
-
-
-        debugTexts.add(fpsText);
-        debugTexts.add(dirText);
-        debugTexts.add(expText);
-        debugTexts.add(satText);
-        debugGroup.addText(fpsText);
-        debugGroup.addText(dirText);
-        debugGroup.addText(expText);
-        debugGroup.addText(satText);
         uiInitialized = true;
     }
 
@@ -171,6 +162,8 @@ public class Engine {
         glEnable(GL_DEPTH_TEST);
         while (!glfwWindowShouldClose(window)) {
             Input.updateGlobalKeys(window);
+            Input.updateGamepad();
+            audioManager.updateAudio();
             boolean wireframe = ioMap.get("wireframe");
             glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -186,14 +179,10 @@ public class Engine {
             frames++;
             onUpdate(deltaTime);
             renderedObjsCount = world.renderScene(ioMap.getOrDefault("use_instancing", false));
-            TextManager.Text fpsText = debugTexts.get(0);
-            TextManager.Text dirText = debugTexts.get(1);
-            TextManager.Text expText = debugTexts.get(2);
-            TextManager.Text satText = debugTexts.get(3);
-
             if (ioMap.get("debug")) {
                 Entity3D waila = camera.getLookingAt();
                 if (waila != null) {
+
                     if (Input.isKeyPressed(GLFW_KEY_F1)) {
                         if (waila.getDebugStage() == 4) {
                             waila.setDebug(0);
@@ -205,21 +194,7 @@ public class Engine {
                 if (Input.isKeyPressed(GLFW_KEY_F2)) {
                     for (Entity3D e : getWorld().getCurrentScene().getWorldEntities()) {e.setDebug(0);}
                 }
-                fpsText.setContent("FPS: " + fps);
-                dirText.setContent("Facing: " + camera.getCompassString());
-                expText.setContent("Exposure: " + getNumValue("exposure"));
-                satText.setContent("Saturation: " + getNumValue("saturation"));
-
-            } else {
-                fpsText.setContent("");
-                dirText.setContent("");
-                expText.setContent("");
-                satText.setContent("");
             }
-            textManager.lookAndUpdateText(fpsText);
-            textManager.lookAndUpdateText(dirText);
-            textManager.lookAndUpdateText(expText);
-            textManager.lookAndUpdateText(satText);
             textManager.renderAll(!ioMap.get("post_processing"));
             List<Runnable> postActions = postFrameActions.getOrDefault(totalFrames, Collections.emptyList());
             for (Runnable r : postActions) {r.run();}
@@ -262,7 +237,8 @@ public class Engine {
         return textManager;
     }
     public LightManager getLightManager() { return lightManager; }
-    public Renderer getRenderer() { return renderer; }
+    public NewRenderer getRenderer() { return renderer; }
+    public AudioManager getAudioManager() {return audioManager;}
     public Bloom getBloom() {return bloom;}
     public Camera getCamera() { return camera; }
     public Skybox getSkybox() {return skybox;}

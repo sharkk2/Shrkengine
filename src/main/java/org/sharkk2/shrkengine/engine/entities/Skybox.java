@@ -73,6 +73,7 @@ public class Skybox {
             shader.setInt("useTexture", 0);
         }
         shader.setVec3("sunDir", engine.getWorld().getCurrentScene().globalSceneLight.direction);
+        shader.setInt("weather", engine.getWorld().getCurrentScene().sceneTime.isCloudy() ? 1:0);
 
         glBindVertexArray(vao);
         glActiveTexture(GL_TEXTURE0);

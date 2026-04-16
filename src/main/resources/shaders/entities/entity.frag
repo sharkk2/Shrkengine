@@ -9,24 +9,37 @@ flat in vec3 fragMatAmbient;
 flat in vec3 fragMatDiffuse;
 flat in vec3 fragMatSpecular;
 flat in vec3 fragMatEmissive;
-flat in float fragMatShininess;
-flat in float fragMatApplyLight;
-flat in float fragMatRainbowEffect;
+flat in vec4 fragMatProps;
 in vec4 fragPosLightSpace;
 out vec4 FragColor;
 
 uniform vec4 color;
-uniform sampler2D texSampler;
-uniform sampler2DShadow shadowMap;
-uniform int useTexture;
-uniform int useInstancing;
 uniform int atlasSize;
 uniform float utime;
-uniform int useColorMask;
 uniform vec3 cameraPos;
 uniform float textureScale;
 uniform vec3 skycolor;
 
+uniform sampler2DShadow shadowMap;
+uniform sampler2D texSampler;
+uniform sampler2D normalMap;
+uniform sampler2D specularMap;
+uniform sampler2D metalnessMap;
+uniform sampler2D aoMap;
+uniform sampler2D roughnessMap;
+uniform sampler2D opacityMap;
+uniform sampler2D emissiveMap;
+
+uniform int useInstancing;
+uniform int useColorMask;
+uniform int useNormalMap;
+uniform int useSpecularMap;
+uniform int useTexture;
+uniform int useOpacityMap;
+uniform int useMetalMap;
+uniform int useEmissiveMap;
+uniform int useAOMap;
+uniform int useRoughnessMap;
 #define MAX_POINT_LIGHTS 16
 
 struct PointLight {
@@ -41,9 +54,7 @@ struct Material {
     vec3 diffuse;
     vec3 specular;
     vec3 emissive;
-    float shininess;
-    float applyLight;
-    float rainbowEffect;
+    vec4 matProps;
 };
 
 struct DirectionalLight {
@@ -67,8 +78,6 @@ uniform PointLight pointLights[MAX_POINT_LIGHTS];
 uniform Material material;
 uniform Fog fog;
 uniform DirectionalLight dirLight;
-uniform sampler2D specularMap;
-uniform int useSpecularMap;
 
 bool equalsClr(vec4 a, vec3 b, float epsl) { return all(lessThan(abs(a.rgb - b), vec3(epsl))); }
 
@@ -130,7 +139,9 @@ float computeShadow(vec4 posLightSpace, vec3 norm, vec3 lightDir) {
     if (projCoords.z > 1.0) return 1.0;
 
     // i literally have no idea how softening and pcf work and i couldnt understand how so this is very likely to produce problems later <:
-    float bias = max(0.0015 * (1.0 - dot(norm, lightDir)), 0.0003);
+    float currentDot = max(dot(norm, lightDir), 0.0);
+    float tanAcos = sqrt(1.0 - currentDot * currentDot) / currentDot;
+    float bias = clamp(0.0005 * tanAcos, 0.0005, 0.015);
     float angle = rand(vec4(gl_FragCoord.xyy, 1.0)) * 6.28318;
     float s = sin(angle);
     float c = cos(angle);
@@ -146,22 +157,64 @@ float computeShadow(vec4 posLightSpace, vec3 norm, vec3 lightDir) {
 }
 
 vec3 applyLighting(vec3 baseColor, vec3 matAmbient, vec3 matDiffuse, vec3 matSpecular, float matShininess) {
-    vec3 norm = normalize(fragNormal);
-    vec3 viewDir = normalize(cameraPos - fragPos);
+    vec3 norm;
+    // for ref: https://learnopengl.com/Advanced-Lighting/Normal-Mapping
+    if (useNormalMap == 1) {
+        vec3 N = normalize(fragNormal);
+        vec3 dp1 = dFdx(fragPos);
+        vec3 dp2 = dFdy(fragPos);
+        vec2 duv1 = dFdx(fragUV);
+        vec2 duv2 = dFdy(fragUV);
+        float det = duv1.x * duv2.y - duv2.x * duv1.y;
+        float invDet = (abs(det) > 0.00001) ? 1.0 / det : 1.0;
+        vec3 T = normalize((dp1 * duv2.y - dp2 * duv1.y) * invDet);
+        T = normalize(T - dot(T, N) * N);
+        vec3 B = cross(N, T);
+        mat3 TBN = mat3(T, B, N);
+        vec3 sampledNormal = texture(normalMap, fragUV).rgb * 2.0 - 1.0;
+        norm = normalize(TBN * sampledNormal);
+    } else {
+        norm = normalize(fragNormal);
+    }
 
-    // dirlight
-    vec3 ambient = dirLight.ambient * matAmbient * baseColor;
+    float effectiveShininess = matShininess;
+    if (useRoughnessMap == 1) {
+        float roughness = texture(roughnessMap, fragUV).r;
+        effectiveShininess = exp2(12.0 * (1.0 - roughness) + 1.0);
+        effectiveShininess = max(effectiveShininess, 1.0);
+    }
+
+    float metalness = 0.0;
+    if (useMetalMap == 1) {
+        metalness = texture(metalnessMap, fragUV).r;
+    }
+
+    vec3 metallicSpecular = mix(matSpecular, baseColor, metalness);
+    vec3 metallicDiffuse = matDiffuse * (1.0 - metalness);
+
+    float ao = 1.0;
+    if (useAOMap == 1) {
+        ao = texture(aoMap, fragUV).r;
+    }
+
+    vec3 viewDir = normalize(cameraPos - fragPos);
+    vec3 resolvedSpecular = useSpecularMap == 1 ? texture(specularMap, fragUV).rgb : metallicSpecular;
+    vec3 ambient = dirLight.ambient * matAmbient * baseColor * ao;
     vec3 result = ambient;
-    float shadow;
-    vec3 resolvedSpecular = useSpecularMap == 1 ? texture(specularMap, fragUV).rgb : matSpecular;
+
+    // directional light
     if (dirLight.enabled == 1) {
         vec3 lightDir = normalize(-dirLight.direction);
         float diff = max(dot(norm, lightDir), 0.0);
-        vec3 diffuse = diff * matDiffuse * baseColor * dirLight.color;
+        vec3 diffuse = diff * metallicDiffuse * baseColor * dirLight.color;
 
-        vec3 reflectDir = reflect(-lightDir, norm);
-        float spec = pow(max(dot(viewDir, reflectDir), 0.0), matShininess);
-        vec3 specular = spec * resolvedSpecular * dirLight.color;
+        vec3 specular = vec3(0.0);
+        if (diff > 0.0) {
+            vec3 halfDir = normalize(lightDir + viewDir);
+            float spec = pow(max(dot(norm, halfDir), 0.0), effectiveShininess);
+            specular = spec * resolvedSpecular * dirLight.color;
+        }
+
         float pointLightFill = 0.0;
         for (int i = 0; i < numPointLights; i++) {
             vec3 lightVec = pointLights[i].position - fragPos;
@@ -177,24 +230,28 @@ vec3 applyLighting(vec3 baseColor, vec3 matAmbient, vec3 matDiffuse, vec3 matSpe
     }
 
     // point lights
-
     for (int i = 0; i < numPointLights; i++) {
         vec3 lightVec = pointLights[i].position - fragPos;
         float dist = length(lightVec);
         vec3 plLightDir = normalize(lightVec);
-
         float plDiff = max(dot(norm, plLightDir), 0.0);
-        vec3 plDiffuse = plDiff * matDiffuse * baseColor;
+        vec3 plDiffuse = plDiff * metallicDiffuse * baseColor;
+        vec3 plSpecular = vec3(0.0);
+        if (plDiff > 0.0) {
+            vec3 plHalfDir = normalize(plLightDir + viewDir);
+            float plSpec = pow(max(dot(norm, plHalfDir), 0.0), effectiveShininess);
+            plSpecular = plSpec * resolvedSpecular;
+        }
 
-        vec3 plReflectDir = reflect(-plLightDir, norm); // phong
-        float plSpec = pow(max(dot(viewDir, plReflectDir), 0.0), matShininess);
-        vec3 plSpecular = plSpec * resolvedSpecular;
+        float linear = 2.0 / pointLights[i].range;
+        float quadratic = 1.0 / (pointLights[i].range * pointLights[i].range);
+        float attenuation = 1.0 / (1.0 + linear * dist + quadratic * dist * dist);
+        attenuation *= clamp(1.0 - (dist / pointLights[i].range), 0.0, 1.0);
 
-        float attenuation = clamp(1.0 - (dist / pointLights[i].range), 0.0, 1.0);
-        attenuation *= attenuation;
-        //  float attenuation = 1.0 / (1.09 * dist + 0.032 * dist * dist);
         result += (plDiffuse + plSpecular) * attenuation * pointLights[i].intensity * pointLights[i].color;
     }
+
+    result = mix(result, result * ao, 0.5);
     return result;
 }
 
@@ -222,17 +279,27 @@ void main() {
     vec3 matDiffuse = useInstancing == 1 ? fragMatDiffuse:material.diffuse;
     vec3 matSpecular = useInstancing == 1 ? fragMatSpecular:material.specular;
     vec3 matEmissive = useInstancing == 1 ? fragMatEmissive:material.emissive;
-    float matShininess = useInstancing == 1 ? fragMatShininess:material.shininess;
-    float applyLight = useInstancing == 1 ? fragMatApplyLight:material.applyLight;
-    float rainbowEffect = useInstancing == 1 ? fragMatRainbowEffect:material.rainbowEffect;
+    float matShininess = useInstancing == 1 ? fragMatProps.x:material.matProps.x;
+    float matEmStrength = useInstancing == 1 ? fragMatProps.w:material.matProps.w;
+    float applyLight = useInstancing == 1 ? fragMatProps.y:material.matProps.y;
+    float rainbowEffect = useInstancing == 1 ? fragMatProps.z:material.matProps.z;
     float alpha = useInstancing == 1 ? instanceColor.a : color.a;
+    if (useOpacityMap == 1) {
+        alpha *= texture(opacityMap, fragUV).r;
+    }
+    if (alpha < 0.02) discard;
+
     if (applyLight == 1) base.rgb = applyLighting(base.rgb, matAmbient, matDiffuse, matSpecular, matShininess);
     float fogFactor = computeFog();
     vec3 camViewDir = normalize(fragPos - cameraPos);
     vec3 litFogColor = computeFogColor(camViewDir, fogFactor);
     vec3 finalColor = mix(litFogColor, base.rgb, fogFactor);
-    vec4 baseClr = useInstancing == 1 ? instanceColor : color;
-    finalColor += (matEmissive * baseClr.rgb);
+    vec3 emissive = matEmissive;
+    if (useEmissiveMap == 1) {
+        vec3 sampled = texture(emissiveMap, fragUV).rgb;
+        emissive = length(sampled) < 0.001 ? finalColor : sampled;
+    }
+    finalColor += emissive * matEmStrength;
 
     if (rainbowEffect == 1) {
         vec3 rainbow = vec3(

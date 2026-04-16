@@ -6,8 +6,10 @@ out vec4 FragColor;
 uniform int useTexture;
 uniform samplerCube skybox;
 uniform vec3 sunDir;
-int useDayNightCycle = 1;
 
+uniform int weather; // 0 = clear, 1 = cloudy
+
+int useDayNightCycle = 1;
 
 void main() {
     if (useTexture == 1) {
@@ -16,36 +18,40 @@ void main() {
     }
 
     vec3 dir = normalize(TexDir);
-    vec3 sDir = normalize(-sunDir); // i obviously didn't code this, claude did. and i have to invert the directional light direction for it to work with this shader
+    vec3 sDir = normalize(-sunDir);
 
-    // (−1 = midnight, 0 = horizon, 1 = noon)
     float sunHeight = sDir.y;
+
     vec3 zenithColor, midColor, horizonColor, hazeColor;
 
     if (useDayNightCycle == 1) {
         float dayBlend = clamp(sunHeight * 2.0, 0.0, 1.0);
-        float sunsetBlend = clamp(1.0 - abs(sunHeight) * 2, 0.0, 1.0);
+        float sunsetBlend = clamp(1.0 - abs(sunHeight) * 2.0, 0.0, 1.0);
 
         vec3 dayZenith = vec3(0.08, 0.15, 0.45);
         vec3 dayMid = vec3(0.25, 0.52, 0.85);
         vec3 dayHorizon = vec3(0.72, 0.84, 0.98);
         vec3 dayHaze = vec3(0.9, 0.75, 0.6);
+
         vec3 sunsetZenith = vec3(0.05, 0.05, 0.25);
         vec3 sunsetMid = vec3(0.6, 0.25, 0.1);
         vec3 sunsetHorizon = vec3(1.0, 0.45, 0.1);
         vec3 sunsetHaze = vec3(1.0, 0.4, 0.15);
+
         vec3 nightZenith = vec3(0.01, 0.01, 0.05);
         vec3 nightMid = vec3(0.02, 0.02, 0.08);
         vec3 nightHorizon = vec3(0.04, 0.04, 0.12);
         vec3 nightHaze = vec3(0.03, 0.03, 0.1);
 
         zenithColor = mix(mix(nightZenith, sunsetZenith, dayBlend), dayZenith, dayBlend);
-        midColor = mix(mix(nightMid,sunsetMid, dayBlend), dayMid, dayBlend);
+        midColor = mix(mix(nightMid, sunsetMid, dayBlend), dayMid, dayBlend);
         horizonColor = mix(mix(nightHorizon, sunsetHorizon, dayBlend), dayHorizon, dayBlend);
         hazeColor = mix(mix(nightHaze, sunsetHaze, dayBlend), dayHaze, dayBlend);
-        zenithColor = mix(zenithColor, sunsetZenith,  sunsetBlend * 0.5);
+
+        zenithColor = mix(zenithColor, sunsetZenith, sunsetBlend * 0.5);
         horizonColor = mix(horizonColor, sunsetHorizon, sunsetBlend * 0.8);
         hazeColor = mix(hazeColor, sunsetHaze, sunsetBlend * 0.9);
+
     } else {
         zenithColor = vec3(0.08, 0.15, 0.45);
         midColor = vec3(0.25, 0.52, 0.85);
@@ -54,6 +60,7 @@ void main() {
     }
 
     float t = clamp(dir.y, 0.0, 1.0);
+
     vec3 skyColor = mix(horizonColor, midColor, smoothstep(0.0, 0.25, t));
     skyColor = mix(skyColor, zenithColor, smoothstep(0.15, 1.0, t));
 
@@ -64,30 +71,29 @@ void main() {
     float sunAngle = acos(clamp(sunDot, -1.0, 1.0));
 
     float sunVisibility = useDayNightCycle == 1 ? clamp(sunHeight * 10.0, 0.0, 1.0) : 1.0;
+
     float discRadius = 0.035;
     float discEdge = smoothstep(discRadius, discRadius * 0.7, sunAngle);
-    float limbDarken = sqrt(max(1.0 - pow(sunAngle / discRadius, 2.0), 0.0));
-    limbDarken = mix(0.75, 1.0, limbDarken);
-    vec3 sunDiscColor = useDayNightCycle == 1 ? mix(vec3(1.0, 0.4, 0.1), vec3(1.0, 0.97, 0.88), clamp(sunHeight * 3.0, 0.0, 1.0)):vec3(1.0, 0.97, 0.88);
-    //sunDiscColor *= limbDarken;
+
+    vec3 sunDiscColor = useDayNightCycle == 1
+    ? mix(vec3(1.0, 0.4, 0.1), vec3(1.0, 0.97, 0.88), clamp(sunHeight * 3.0, 0.0, 1.0))
+    : vec3(1.0, 0.97, 0.88);
 
     float innerCorona = exp(-sunAngle * 80.0) * 0.9;
     float outerGlow = exp(-sunAngle * 12.0) * 0.4;
     float mie = pow(max(sunDot, 0.0), 6.0) * 0.6;
 
+    vec3 sunContrib = vec3(0.0);
     vec3 innerCoronaColor = vec3(8,7,5.5);
     vec3 glowColor = vec3(1.0, 0.85, 0.55);
-    vec3 mieColor  = vec3(1.0, 0.75, 0.45);
+    vec3 mieColor = vec3(1.0, 0.75, 0.45);
 
-    vec3 sunContrib = vec3(0.0);
     sunContrib += mieColor * mie;
     sunContrib += glowColor * outerGlow;
     sunContrib += innerCoronaColor * innerCorona;
-    sunContrib += sunDiscColor * discEdge * 20;
+    sunContrib += sunDiscColor * discEdge * 20.0;
     sunContrib *= sunVisibility;
 
-
-    // Hash for pseudo-random stars
     vec3 starDir = normalize(TexDir);
     vec3 absDir = abs(starDir);
     vec2 faceUV;
@@ -112,11 +118,14 @@ void main() {
     float rand3 = fract(sin(dot(cellSeed, vec3(113.5, 271.9, 124.6))) * 43758.5453);
 
     float starBrightness = 0.0;
+
     if (rand > 0.95) {
         vec2 cellUV = fract(faceUV * 40.0) - 0.5;
         cellUV -= (vec2(rand2, rand3) - 0.5) * 0.6;
+
         float dist = length(cellUV);
         float size = mix(0.04, 0.12, rand2);
+
         starBrightness = smoothstep(size, size * 0.3, dist);
         starBrightness *= mix(0.4, 1.0, rand3);
     }
@@ -126,13 +135,36 @@ void main() {
 
     float starVisibility = useDayNightCycle == 1 ? clamp(-sunHeight * 4.0, 0.0, 1.0) : 0.0;
     starVisibility *= clamp(dir.y * 10.0, 0.0, 1.0);
+
     vec3 starColor = mix(vec3(0.8, 0.9, 1.0), vec3(1.0, 0.85, 0.7), rand2);
     vec3 starContrib = starColor * starBrightness * 2.5 * starVisibility;
+    vec3 clearColor = skyColor + sunContrib + starContrib;
 
-    vec3 finalColor = skyColor + sunContrib + starContrib;
+    vec3 cloudyDay = vec3(0.65, 0.65, 0.65);
+    vec3 cloudyNight = vec3(0.05, 0.06, 0.08);
 
-   // finalColor = finalColor / (finalColor + vec3(0.6));
-    //finalColor = pow(finalColor, vec3(1.0 / 2));
+    float dayFactor = clamp(sunHeight * 0.5 + 0.5, 0.0, 1.0);
+    vec3 cloudyColor = mix(cloudyNight, cloudyDay, dayFactor);
+
+    float isCloudy = float(weather == 1);
+
+    if (isCloudy > 0.5) {
+        vec3 baseSky = skyColor;
+        float horizonMask = 1.0 - smoothstep(0.0, 0.3, dir.y);
+        float zenithMask  = smoothstep(0.2, 1.0, dir.y);
+        vec3 cloudyDay = vec3(0.68, 0.68, 0.70);
+        vec3 cloudyNight  = vec3(0.06, 0.07, 0.09);
+
+        float dayFactor = clamp(sunHeight * 0.5 + 0.5, 0.0, 1.0);
+        vec3 cloudyBase = mix(cloudyNight, cloudyDay, dayFactor);
+        vec3 horizonBlend = mix(baseSky, cloudyBase, 0.85);
+        vec3 zenithBlend  = mix(baseSky, cloudyBase, 0.55);
+
+        vec3 cloudySky = mix(horizonBlend, zenithBlend, zenithMask);
+        clearColor = mix(clearColor, cloudySky, 0.85);
+    }
+
+    vec3 finalColor = clearColor;
 
     FragColor = vec4(finalColor, 1.0);
 }

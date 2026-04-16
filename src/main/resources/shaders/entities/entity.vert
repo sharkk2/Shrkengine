@@ -13,9 +13,7 @@ layout(location = 9)  in vec3 iMatAmbient;
 layout(location = 10) in vec3 iMatDiffuse;
 layout(location = 11) in vec3 iMatSpecular;
 layout(location = 12) in vec3 iMatEmissive;
-layout(location = 13) in float iMatShininess;
-layout(location = 14) in float iMatApplyLight;
-layout(location = 15) in float iMatRainbowEffect;
+layout(location = 13) in vec4 iMatProps;
 
 out vec2 fragUV;
 out vec3 fragPos;
@@ -28,10 +26,7 @@ flat out vec3 fragMatAmbient;
 flat out vec3 fragMatDiffuse;
 flat out vec3 fragMatSpecular;
 flat out vec3 fragMatEmissive;
-flat out float fragMatShininess;
-flat out float fragMatApplyLight;
-flat out float fragMatRainbowEffect;
-
+flat out vec4 fragMatProps;
 
 uniform mat4 projection;
 uniform mat4 view;
@@ -54,8 +49,5 @@ void main() {
     fragMatDiffuse = iMatDiffuse;
     fragMatSpecular = iMatSpecular;
     fragMatEmissive = (useInstancing == 1) ? iMatEmissive : vec3(0.0);
-    fragMatShininess = iMatShininess;
-    fragMatApplyLight = iMatApplyLight;
-    fragMatRainbowEffect = iMatRainbowEffect;
-    fragMatEmissive = iMatEmissive;
+    fragMatProps = iMatProps;
 }

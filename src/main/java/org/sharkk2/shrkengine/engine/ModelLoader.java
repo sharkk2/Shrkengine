@@ -19,12 +19,13 @@ import static org.lwjgl.stb.STBImage.*;
 
 public class ModelLoader {
 
-    private record CachedMesh(MeshData data, List<Mesh.MeshTexture> textures, Matrix4f nodeTransform, Vector3f ambient, Vector3f diffuse, Vector3f specular, Vector3f emissive, float shininess) {}
+    private record CachedMesh(MeshData data, List<Mesh.MeshTexture> textures, Matrix4f nodeTransform, Vector3f ambient, Vector3f diffuse, Vector3f specular, Vector3f emissive, float shininess, float emissiveFactor) {}
 
     private final Engine engine;
     private String directory;
     private final Map<String, Mesh.MeshTexture> textureCache = new HashMap<>();
     private final Map<String, List<CachedMesh>> modelCache = new HashMap<>();
+    private boolean flipUVs;
 
     public ModelLoader(Engine engine) {
         this.engine = engine;
@@ -51,6 +52,10 @@ public class ModelLoader {
         directory = (lastSlash >= 0) ? path.substring(0, lastSlash + 1) : "";
 
         List<CachedMesh> cached = new ArrayList<>();
+        int lastDot = path.lastIndexOf('.');
+        String ext = (lastDot >= 0) ? path.substring(lastDot).toLowerCase() : "";
+        flipUVs = ext.equals(".gltf") || ext.equals(".glb"); // gltf and glb do NOT store v 0 at the bottom
+
         processNode(aiScene.mRootNode(), aiScene, new Matrix4f(), cached);
         aiReleaseImport(aiScene);
         modelCache.put(path, cached);
@@ -69,6 +74,7 @@ public class ModelLoader {
             mesh.material.setDiffuse(c.diffuse());
             mesh.material.setSpecular(c.specular());
             mesh.material.setEmissive(c.emissive());
+            mesh.material.setEmissiveStrength(c.emissiveFactor());
             if (c.shininess() > 0) mesh.material.setShininess(c.shininess());
             result.add(mesh);
         }
@@ -121,7 +127,6 @@ public class ModelLoader {
             positions[i * 3] = pos.x();
             positions[i * 3 + 1] = pos.y();
             positions[i * 3 + 2] = pos.z();
-
             if (normBuffer != null) {
                 AIVector3D norm = normBuffer.get(i);
                 normals[i * 3] = norm.x();
@@ -132,7 +137,7 @@ public class ModelLoader {
             if (uvBuffer != null) {
                 AIVector3D uv = uvBuffer.get(i);
                 uvs[i * 2] = uv.x();
-                uvs[i * 2 + 1] = uv.y();
+                uvs[i * 2 + 1] = flipUVs ? 1.0f - uv.y() : uv.y();
             }
         }
 
@@ -154,11 +159,21 @@ public class ModelLoader {
         Vector3f emissive = new Vector3f();
 
         float shininess = 0;
+        float emissiveFactor = 1;
         int matIndex = aiMesh.mMaterialIndex();
         if (matIndex >= 0 && aiScene.mMaterials() != null) {
             AIMaterial aiMaterial = AIMaterial.create(aiScene.mMaterials().get(matIndex));
-            textures.addAll(loadMaterialTextures(aiMaterial, aiTextureType_DIFFUSE, "texture_diffuse", aiScene));
+            List<Mesh.MeshTexture> albedo = loadMaterialTextures(aiMaterial, aiTextureType_BASE_COLOR, "texture_diffuse", aiScene);
+            if (albedo.isEmpty() || albedo == null) albedo = loadMaterialTextures(aiMaterial, aiTextureType_DIFFUSE, "texture_diffuse", aiScene);
+            textures.addAll(albedo);
+            textures.addAll(loadMaterialTextures(aiMaterial, aiTextureType_AMBIENT_OCCLUSION, "texture_ao", aiScene));
+            textures.addAll(loadMaterialTextures(aiMaterial, aiTextureType_DIFFUSE_ROUGHNESS, "texture_roughness", aiScene));
             textures.addAll(loadMaterialTextures(aiMaterial, aiTextureType_SPECULAR, "texture_specular", aiScene));
+            textures.addAll(loadMaterialTextures(aiMaterial, aiTextureType_EMISSIVE, "texture_emissive", aiScene)); // this was way more important than i thought
+            textures.addAll(loadMaterialTextures(aiMaterial, aiTextureType_METALNESS, "texture_metalness", aiScene));
+            textures.addAll(loadMaterialTextures(aiMaterial, aiTextureType_OPACITY, "texture_opacity", aiScene));
+            List<Mesh.MeshTexture> normalMaps = loadMaterialTextures(aiMaterial, aiTextureType_NORMALS, "texture_normal", aiScene);
+            textures.addAll(normalMaps);
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 AIColor4D color = AIColor4D.malloc(stack);
                 if (aiGetMaterialColor(aiMaterial, AI_MATKEY_COLOR_AMBIENT, aiTextureType_NONE, 0, color) == aiReturn_SUCCESS) {
@@ -182,16 +197,25 @@ public class ModelLoader {
                 }
                 FloatBuffer emissiveStrength = stack.mallocFloat(1);
                 maxOut.put(0, 1);
-                float emissiveFactor = 1.0f;
                 if (aiGetMaterialFloatArray(aiMaterial, AI_MATKEY_EMISSIVE_INTENSITY, aiTextureType_NONE, 0, emissiveStrength, maxOut) == aiReturn_SUCCESS) {
                     emissiveFactor = emissiveStrength.get(0);
                 }
-                emissive.mul(emissiveFactor);
+
+            }
+        }
+        if (engine.getWorld().getCurrentScene().getName().equals("testscene")) {
+            System.out.println("[Mesh] ambient=" + ambient + " diffuse=" + diffuse +
+                    " emissive=" + emissive + " emFactor=" + emissiveFactor +
+                    " shininess=" + shininess + " texCount=" + textures.size());
+
+            for (Mesh.MeshTexture t : textures) {
+                System.out.println("  tex: " + t.type + " -> " + t.path);
             }
         }
 
+
         MeshData data = new MeshData(positions, normals, uvs, indices);
-        return new CachedMesh(data, textures, nodeTransform, ambient, diffuse, specular, emissive, shininess);
+        return new CachedMesh(data, textures, nodeTransform, ambient, diffuse, specular, emissive, shininess, emissiveFactor);
     }
 
     private List<Mesh.MeshTexture> loadMaterialTextures(AIMaterial material, int texType, String typeName, AIScene aiScene) {
@@ -205,10 +229,11 @@ public class ModelLoader {
 
             String relativePath = aiPath.dataString();
             aiPath.free();
-
+            String fullPath = (directory + relativePath).replace('\\', '/');
+            long sceneId = aiScene.address();
             if (relativePath.startsWith("*")) {
                 int texIndex = Integer.parseInt(relativePath.substring(1));
-                String cacheKey = "__embedded__" + texIndex;
+                String cacheKey = sceneId +  "__embedded__" + texIndex;
                 if (textureCache.containsKey(cacheKey)) {
                     textures.add(textureCache.get(cacheKey));
                 } else {
@@ -222,7 +247,6 @@ public class ModelLoader {
                 continue;
             }
 
-            String fullPath = (directory + relativePath).replace('\\', '/');
             if (textureCache.containsKey(fullPath)) {
                 textures.add(textureCache.get(fullPath));
             } else {

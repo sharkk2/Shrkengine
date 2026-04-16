@@ -3,18 +3,19 @@ package org.sharkk2.shrkengine.engine;
 import static org.lwjgl.glfw.GLFW.*;
 
 import org.joml.Matrix4f;
+import org.joml.Vector2f;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
 import org.sharkk2.shrkengine.engine.classes.Entity3D;
 import org.sharkk2.shrkengine.engine.classes.Model;
 import org.sharkk2.shrkengine.engine.entities.Mesh;
 
+import java.nio.DoubleBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
 public class Camera {
-    private Engine engine;
-
+    private final Engine engine;
     private float yaw = -90f;
     private float pitch = 0f;
     private float lastX, lastY;
@@ -22,15 +23,17 @@ public class Camera {
     private static final float ACCELERATION = 3.5f;
     private static final float MAX_SPEED = 7f;
     private static final float FRICTION = 0.85f;
+    private static final float MOUSE_SENSITIVITY = 0.1f;
+    private static final float GAMEPAD_SENSITIVITY = 1.3f;
     public static final int NORTH = 0;
     public static final int EAST = 1;
     public static final int WEST = 2;
     public static final int SOUTH = 3;
-    private float velocityX, velocityZ, velocityY;
+    public float velocityX, velocityZ, velocityY;
 
-    private Vector3f position = new Vector3f(0, 0, 3);
+    private final Vector3f position = new Vector3f(0, 0, 3);
     private Vector3f front = new Vector3f(0, 0, -1);
-    private Vector3f up = new Vector3f(0, 1, 0);
+    private final Vector3f up = new Vector3f(0, 1, 0);
     private final Vector4f[] planes = new Vector4f[6];
     private final float edgeBuffer = 1f;
     private float fov = 60f;
@@ -38,15 +41,19 @@ public class Camera {
     private float far = 1000f;
     public boolean positionlock = false;
     public boolean viewLock = false;
-    private List<String> frustumExceptions = new ArrayList<>();
+    private final List<String> frustumExceptions = new ArrayList<>();
     private Entity3D waila;
+    private boolean mouseVisible = false;
+    private boolean wasMouseDown = false;
+    private final Vector2f mousePosition = new Vector2f();
 
     public Camera(Engine engine) {
         this.engine = engine;
 
-        glfwSetInputMode(engine.getWindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-
+        if (!mouseVisible) glfwSetInputMode(engine.getWindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         glfwSetCursorPosCallback(engine.getWindow(), (w, xpos, ypos) -> {
+            mousePosition.set(xpos, ypos);
+            if (mouseVisible && !Input.isMouseDown(GLFW_MOUSE_BUTTON_RIGHT)) return;
             if (viewLock) {return;}
             if (firstMouse) {
                 lastX = (float)xpos;
@@ -54,41 +61,42 @@ public class Camera {
                 firstMouse = false;
             }
 
+            if (mouseVisible && !wasMouseDown && Input.isMouseDown(GLFW_MOUSE_BUTTON_RIGHT)) {
+                lastX = (float)xpos;
+                lastY = (float)ypos;
+                wasMouseDown = true;
+            }
+
             float xoffset = (float)xpos - lastX;
             float yoffset = lastY - (float)ypos; // reversed Y
+
             lastX = (float)xpos;
             lastY = (float)ypos;
 
-            float sensitivity = 0.1f;
+            float sensitivity = MOUSE_SENSITIVITY;
+            if (mouseVisible) sensitivity *= 1.5f;
             xoffset *= sensitivity;
             yoffset *= sensitivity;
-
             yaw += xoffset;
             pitch += yoffset;
-
             if (pitch > 89) pitch = 89;
             if (pitch < -89) pitch = -89;
             if (yaw > 360) yaw = 0;
             if (yaw < 0) yaw = 360;
 
-            updateCamVectors();
         });
 
-        updateCamVectors();
         for (int i = 0; i < 6; i++) {
             planes[i] = new Vector4f();
         }
     }
 
-    private void updateCamVectors() {
 
-    }
 
     public Matrix4f getViewMatrix() {
         Vector3f center = new Vector3f(position).add(front);
         return new Matrix4f().lookAt(position, center, up);
     }
-
 
     public Matrix4f getProjectionMatrix() {
         Matrix4f proj = new Matrix4f();
@@ -97,18 +105,53 @@ public class Camera {
     }
 
     public void update() {
+        if (Input.isMouseReleased(GLFW_MOUSE_BUTTON_RIGHT) && wasMouseDown) wasMouseDown = false;
+        float dt = engine.getDeltaTime();
+        if (Input.isGamepadConnected()) {
+            if (!viewLock) {
+                float x = Input.getAxis(GLFW_GAMEPAD_AXIS_RIGHT_X, 0.15f);
+                float y = Input.getAxis(GLFW_GAMEPAD_AXIS_RIGHT_Y, 0.15f);
+                if (!(x == 0 && y == 0)) {
+                    yaw += x * dt * (GAMEPAD_SENSITIVITY * 100);
+                    pitch -= y * dt * (GAMEPAD_SENSITIVITY * 100);
+
+                    if (pitch > 89) pitch = 89;
+                    if (pitch < -89) pitch = -89;
+                    if (yaw > 360) yaw = 0;
+                    if (yaw < 0) yaw = 360;
+                }
+            }
+
+        }
+
+
         Vector3f newFront = new Vector3f();
         newFront.x = (float) Math.cos(Math.toRadians(yaw)) * (float) Math.cos(Math.toRadians(pitch));
         newFront.y = (float) Math.sin(Math.toRadians(pitch));
         newFront.z = (float) Math.sin(Math.toRadians(yaw)) * (float) Math.cos(Math.toRadians(pitch));
         front = newFront.normalize();
-        updateCamVectors();
+        Vector3f right = new Vector3f(front).cross(new Vector3f(0, 1, 0)).normalize();
+        Vector3f up = new Vector3f(right).cross(front).normalize();
 
         if (positionlock) return;
-        float dt = engine.getDeltaTime();
-        if (Input.isKeyDown(GLFW_KEY_SPACE)) position.y += MAX_SPEED * dt;
-        if (Input.isKeyDown(GLFW_KEY_LEFT_SHIFT)) position.y -= MAX_SPEED * dt;
-
+        if (Input.isKeyDown(GLFW_KEY_SPACE)) {
+            velocityY = MAX_SPEED * dt;
+            position.y += velocityY;
+        }
+        if (Input.isKeyDown(GLFW_KEY_LEFT_SHIFT)) {
+            velocityY = -MAX_SPEED * dt;
+            position.y += velocityY;
+        }
+        if (Input.isGamepadConnected()) {
+            if (Input.isButtonDown(GLFW_GAMEPAD_BUTTON_CROSS)) {
+                velocityY = MAX_SPEED * dt;
+                position.y += velocityY;
+            }
+            if (Input.isButtonDown(GLFW_GAMEPAD_BUTTON_RIGHT_THUMB)) {
+                velocityY = -MAX_SPEED * dt;
+                position.y += velocityY;
+            }
+        }
 
         float radYaw = (float) Math.toRadians(yaw);
         float radPitch = (float) Math.toRadians(pitch);
@@ -122,6 +165,14 @@ public class Camera {
         if (Input.isKeyDown(GLFW_KEY_S)) { moveX -= forwardX; moveZ -= forwardZ; }
         if (Input.isKeyDown(GLFW_KEY_A)) { moveX -= rightX; moveZ -= rightZ; }
         if (Input.isKeyDown(GLFW_KEY_D)) { moveX += rightX; moveZ += rightZ; }
+        if (Input.isGamepadConnected()) {
+            float lx = Input.getAxis(GLFW_GAMEPAD_AXIS_LEFT_X, 0.15f);
+            float ly = Input.getAxis(GLFW_GAMEPAD_AXIS_LEFT_Y, 0.15f);
+            moveX += forwardX * -ly;
+            moveZ += forwardZ * -ly;
+            moveX += rightX * lx;
+            moveZ += rightZ * lx;
+        }
 
         float accel = ACCELERATION * dt;
         float maxSpeed = MAX_SPEED * dt;
@@ -156,7 +207,6 @@ public class Camera {
                     pushDist = overlapZ;
                 }
 
-                // only cancel velocity along the collision axis, not all of it
                 Vector3f vel = new Vector3f(velocityX, 0, velocityZ);
                 float velAlongAxis = vel.dot(pushAxis);
                 if (velAlongAxis < 0) {
@@ -276,7 +326,7 @@ public class Camera {
         Entity3D closest = null;
         float closestT = maxDistance;
         for (Entity3D e : getFrustum(engine.getWorld().getCurrentScene().getWorldEntities(), 5)) {
-            if (!e.isAlive() || !e.isVisible() || e.getModel() == null) continue;
+            if (!e.isAlive() || !e.isVisible() || e.getOBB() == null) continue;
             float t = rayIntersects(origin, direction, e.getOBB());
             if (t >= 0.01f && t < closestT) {
                 closestT = t;
@@ -285,6 +335,42 @@ public class Camera {
         }
 
         return closest;
+    }
+
+    public Entity3D castMouseRay(float mouseX, float mouseY) {
+        float maxDistance = 100;
+        Vector3f origin = new Vector3f(getPosition());
+        Vector3f direction = calculateMouseRay(mouseX, mouseY);
+        Entity3D closest = null;
+        float closestT = maxDistance;
+        for (Entity3D e : engine.getWorld().getCurrentScene().getWorldEntities()) {
+            if (!e.isAlive() || !e.isVisible() || e.getOBB() == null) continue;
+            Entity3D.OBB obb = e.getOBB();
+            float t = rayIntersects(origin, direction, obb);
+            if (t >= 0.01f && t < closestT) {
+                closestT = t;
+                closest = e;
+            }
+        }
+
+        return closest;
+    }
+
+    public Vector3f calculateMouseRay(float mouseX, float mouseY) {
+        // reverses the transformations we apply for 3D coordinates to crush it into 2D "just uncrushes it back"
+        // Transform into NDC "the Utils toNDC is just useless tbh"
+        float x = (2.0f * mouseX) / engine.windowWidth - 1.0f;
+        float y = 1.0f - (2.0f * mouseY) / engine.windowHeight;
+        // NDC Space -> Clip Space
+        Vector4f clipCoords = new Vector4f(x, y, -1.0f, 1.0f);
+        // Clip Space -> Eye Space
+        Matrix4f invertedProjection = getProjectionMatrix().invert();
+        Vector4f eyeCoords = invertedProjection.transform(clipCoords);
+        eyeCoords.set(eyeCoords.x, eyeCoords.y, -1.0f, 0.0f);
+        // 4. Eye Space -> World Space
+        Matrix4f invertedView = getViewMatrix().invert();
+        Vector4f rayWorld = invertedView.transform(eyeCoords);
+        return new Vector3f(rayWorld.x, rayWorld.y, rayWorld.z).normalize();
     }
 
     private float rayIntersects(Vector3f origin, Vector3f dir, Entity3D.OBB obb) {
@@ -343,6 +429,29 @@ public class Camera {
     public void setPositionlock(boolean lock) {positionlock = lock;}
     public boolean isPositionlocked() {return positionlock;}
     public boolean isViewLocked() {return viewLock;}
-
+    public Vector3f getUp() { return new Vector3f(up); }
     public Entity3D getLookingAt() {return waila;}
+    public Vector3f getVelocity() {return new Vector3f(velocityX, velocityY, velocityZ);}
+    public void toggleMouseVisibility() {
+        mouseVisible = !mouseVisible;
+        if (mouseVisible) {
+            glfwSetInputMode(engine.getWindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            firstMouse = true;
+        } else {
+            glfwSetInputMode(engine.getWindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            firstMouse = true;
+        }
+    }
+
+    public Vector2f getMousePosition() {return mousePosition;}
+    public void lookAt(Vector3f position) {
+        float dx = position.x - getX();
+        float dy = position.y - getY();
+        float dz = position.z - getZ();
+        float yaw = (float) Math.toDegrees(Math.atan2(dz, dx));
+        float distance = (float) Math.sqrt(dx * dx + dz * dz);
+        float pitch = (float) Math.toDegrees(Math.atan2(dy, distance));
+        setYaw(yaw);
+        setPitch(pitch);
+    }
 }

@@ -90,7 +90,7 @@ public class LightManager {
 
 
     public static class ShadowMap {
-        public static final int SHADOW_WIDTH = 4096, SHADOW_HEIGHT = 4096;
+        public static final int SHADOW_WIDTH = 2048, SHADOW_HEIGHT = 2048;
         public int fbo;
         public int depthTexture;
 
