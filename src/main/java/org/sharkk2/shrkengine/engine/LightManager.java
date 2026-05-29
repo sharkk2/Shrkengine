@@ -11,8 +11,10 @@ import java.util.List;
 import static org.lwjgl.opengl.GL33.*;
 
 public class LightManager {
+    private final Engine engine;
     private final List<PointLight> pointLights = new ArrayList<>();
-    private static int nextId = 0;
+    public LightManager.ShadowMap shadowMap = new LightManager.ShadowMap(2048, 2048);
+    private static int nextId = 0; // todo: replace with an AtomicInteger
 
     public static class PointLight {
         private Quad quad;
@@ -36,19 +38,19 @@ public class LightManager {
                 quad.applyTexture(5);
                 quad.setSize(0.5f, 0.5f, 0.5f);
                 quad.setPosition(position.x, position.y, position.z);
+                quad.script(() -> {
+                    Vector3f camPos = engine.getCamera().getPosition();
+                    float dx = camPos.x - quad.getX();
+                    float dz = camPos.z - quad.getZ();
+                    float yaw = (float)Math.toDegrees(Math.atan2(dx, dz)) + 180f;
+
+                    quad.setRotation(0, yaw, 0);
+                });
                 quad.material.applyLight(false);
 
                 engine.getWorld().getCurrentScene().addWorldEntity(quad);
                 visualized = true;
             }
-            quad.update(() -> {
-                Vector3f camPos = engine.getCamera().getPosition();
-                float dx = camPos.x - quad.getX();
-                float dz = camPos.z - quad.getZ();
-                float yaw = (float)Math.toDegrees(Math.atan2(dx, dz)) + 180f;
-
-                quad.setRotation(0, yaw, 0);
-            });
 
         }
 
@@ -56,7 +58,8 @@ public class LightManager {
 
     }
 
-
+    public LightManager(Engine engine) {this.engine = engine;}
+    public void resizeShadowMap(int w, int h) {this.shadowMap = new ShadowMap(w,h);}
     public void addPointLight(PointLight light) {
         pointLights.add(light);
     }
@@ -79,6 +82,7 @@ public class LightManager {
 
     public List<PointLight> getPointLights() {return pointLights;}
     public void removePointLight(PointLight light) {pointLights.remove(light);}
+    public int getPointLightCount() {return pointLights.size();}
     public PointLight removePointLight(int id) {
         pointLights.removeIf(light -> light.id == id);
         return null;
@@ -90,14 +94,14 @@ public class LightManager {
 
 
     public static class ShadowMap {
-        public static final int SHADOW_WIDTH = 2048, SHADOW_HEIGHT = 2048;
+        public int width = 2048, height = 2048;
         public int fbo;
         public int depthTexture;
 
-        public ShadowMap() {
+        private void init() {
             depthTexture = glGenTextures();
             glBindTexture(GL_TEXTURE_2D, depthTexture);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, (ByteBuffer) null);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, (ByteBuffer) null);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
@@ -113,6 +117,13 @@ public class LightManager {
             glDrawBuffer(GL_NONE);
             glReadBuffer(GL_NONE);
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        }
+
+        public ShadowMap() {init();}
+
+        public ShadowMap(int width, int height) {
+            this.width =width; this.height = height;
+            init();
         }
 
         public void cleanup() {

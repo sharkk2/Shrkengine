@@ -1,18 +1,18 @@
 package org.sharkk2.shrkengine.engine;
 
-import org.sharkk2.shrkengine.engine.classes.Entity2D;
-import org.sharkk2.shrkengine.engine.classes.Entity3D;
+import org.joml.Matrix4f;
 import org.sharkk2.shrkengine.engine.classes.Scene;
-import org.sharkk2.shrkengine.engine.entities.Cube;
-import org.sharkk2.shrkengine.engine.ui.TextManager;
-
-import java.util.*;
+import org.sharkk2.shrkengine.engine.classes.WorldEntity;
+import org.sharkk2.shrkengine.engine.entities.Mesh;
+import org.sharkk2.shrkengine.engine.entities.particlesys.Particle;
 
 
 // TODO: Make sure ram is freed whenever a scene changes
 public class World {
     private final Engine engine;
     private Scene currentScene;
+    private final Matrix4f entityModel = new Matrix4f();
+    private final Matrix4f meshModel = new Matrix4f();
 
     public World(Engine engine) {
         this.engine = engine;
@@ -21,28 +21,43 @@ public class World {
     public void setCurrentScene(Scene scene) {
         engine.getCamera().setPositionlock(false);
         engine.getCamera().setViewLock(false);
-        TextManager.TextGroup tg = null;
         if (currentScene != null) {
-            tg = engine.getTextManager().createTextGroup();
-            tg.addText(new TextManager.Text(100, 100, 24, 1, 1, 1,  1,"Loading..."));
             engine.getRenderer().cleanup();
-            engine.getModelLoader().cleanup();
             currentScene.destroy();
             engine.getLightManager().destroyAll();
             engine.getTextureLoader().clearCache();
             engine.getAudioManager().cleanupSources();
         }
         currentScene = scene;
-        currentScene.load();
-        if (tg != null) engine.getTextManager().removeGroup(tg.groupID);
-
+        currentScene.loadScene();
     }
 
     public int renderScene(boolean useInstancing) {
-        currentScene.tick();
-        currentScene.processRemovals();
-        return engine.getRenderer().render(currentScene, useInstancing, true); //keep update models true or entire engine breaks
+        return engine.getRenderer().render(currentScene, useInstancing); //keep update models true or entire engine breaks
     }
 
     public Scene getCurrentScene() {return currentScene;}
+    public boolean isSceneRunning() {return currentScene != null;}
+    public void tickWorld() {
+        currentScene.tickScene();
+        currentScene.processRemovals();
+    }
+
+    public void computeModel(WorldEntity entity) {
+        if (!(entity instanceof Mesh) && !(entity instanceof Particle)) {
+
+            entityModel.identity()
+                    .translate(entity.getX(), entity.getY(), entity.getZ())
+                    .rotate(entity.getRotation())
+                    .scale(entity.getWidth(), entity.getHeight(), entity.getDepth());
+            entity.getModel().set(entityModel);
+        } else if (entity instanceof Mesh m) {
+            meshModel.identity()
+                    .translate(m.getX(), m.getY(), m.getZ())
+                    .rotate(entity.getRotation())
+                    .scale(m.getWidth(), m.getHeight(), m.getDepth())
+                    .mul(m.getNodeTransform());
+            m.getModel().set(meshModel);
+        }
+    }
 }

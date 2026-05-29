@@ -6,7 +6,7 @@ import org.sharkk2.shrkengine.engine.Engine;
 import org.sharkk2.shrkengine.engine.ShaderLoader;
 
 import static org.lwjgl.glfw.GLFW.glfwGetTime;
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL43.*;
 import static org.lwjgl.system.MemoryUtil.memFree;
 
 public class Skybox {
@@ -67,8 +67,11 @@ public class Skybox {
             shader.setMat4("view", view);
             shader.setMat4("projection", projection);
         }
+        glBindVertexArray(vao);
         if (cubemapTex != -1) {
             shader.setInt("useTexture", 1);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTex);
         } else {
             shader.setInt("useTexture", 0);
         }
@@ -76,8 +79,6 @@ public class Skybox {
         shader.setInt("weather", engine.getWorld().getCurrentScene().sceneTime.isCloudy() ? 1:0);
 
         glBindVertexArray(vao);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTex);
         glDrawArrays(GL_TRIANGLES, 0, 36);
         glBindVertexArray(0);
         glDepthMask(true);

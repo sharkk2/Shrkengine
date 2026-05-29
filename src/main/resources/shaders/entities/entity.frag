@@ -1,4 +1,4 @@
-#version 330 core
+#version 430 core
 
 in vec2 fragUV;
 in vec3 fragPos;
@@ -110,22 +110,22 @@ vec3 computeFogColor(vec3 camViewDir, float fogFactor) {
 }
 
 const vec2 poissonDisk[16] = vec2[](
-   vec2(-0.94201624, -0.39906216),
-   vec2( 0.94558609, -0.76890725),
-   vec2(-0.094184101, -0.92938870),
-   vec2( 0.34495938, 0.29387760),
-   vec2(-0.91588581, 0.45771432),
-   vec2(-0.81544232, -0.87912464),
-   vec2(-0.38277543, 0.27676845),
-   vec2( 0.97484398, 0.75648379),
-   vec2( 0.44323325, -0.97511554),
-   vec2( 0.53742981, -0.47373420),
-   vec2(-0.26496911, -0.41893023),
-   vec2( 0.79197514, 0.19090188),
-   vec2(-0.24188840, 0.99706507),
-   vec2(-0.81409955, 0.91437590),
-   vec2( 0.19984126, 0.78641367),
-   vec2( 0.14383161, -0.14100790)
+vec2(-0.94201624, -0.39906216),
+vec2( 0.94558609, -0.76890725),
+vec2(-0.094184101, -0.92938870),
+vec2( 0.34495938, 0.29387760),
+vec2(-0.91588581, 0.45771432),
+vec2(-0.81544232, -0.87912464),
+vec2(-0.38277543, 0.27676845),
+vec2( 0.97484398, 0.75648379),
+vec2( 0.44323325, -0.97511554),
+vec2( 0.53742981, -0.47373420),
+vec2(-0.26496911, -0.41893023),
+vec2( 0.79197514, 0.19090188),
+vec2(-0.24188840, 0.99706507),
+vec2(-0.81409955, 0.91437590),
+vec2( 0.19984126, 0.78641367),
+vec2( 0.14383161, -0.14100790)
 );
 
 float rand(vec4 seed) {
@@ -156,10 +156,14 @@ float computeShadow(vec4 posLightSpace, vec3 norm, vec3 lightDir) {
     return shadow / 16.0;
 }
 
-vec3 applyLighting(vec3 baseColor, vec3 matAmbient, vec3 matDiffuse, vec3 matSpecular, float matShininess) {
+// lod levels:
+//   0 = full quality (dist < 25): normal map, specular map, roughness, metalness, AO, PCF shadows, point lights
+//   1 = mid quality (dist < 50): flat normals, basic specular, no roughness/metal/AO maps, simple shadow, point lights
+//   2 = low quality (dist >= 50): flat normals, no specular, no maps, no point lights, flat shadow
+vec3 applyLighting(vec3 baseColor, vec3 matAmbient, vec3 matDiffuse, vec3 matSpecular, float matShininess, int lod) {
     vec3 norm;
     // for ref: https://learnopengl.com/Advanced-Lighting/Normal-Mapping
-    if (useNormalMap == 1) {
+    if (useNormalMap == 1 && lod == 0) {
         vec3 N = normalize(fragNormal);
         vec3 dp1 = dFdx(fragPos);
         vec3 dp2 = dFdy(fragPos);
@@ -178,14 +182,14 @@ vec3 applyLighting(vec3 baseColor, vec3 matAmbient, vec3 matDiffuse, vec3 matSpe
     }
 
     float effectiveShininess = matShininess;
-    if (useRoughnessMap == 1) {
+    if (useRoughnessMap == 1 && lod == 0) {
         float roughness = texture(roughnessMap, fragUV).r;
-        effectiveShininess = exp2(12.0 * (1.0 - roughness) + 1.0);
-        effectiveShininess = max(effectiveShininess, 1.0);
+        float r = max(roughness, 0.01);
+        effectiveShininess = clamp(2.0 / (r * r) - 2.0, 2.0, 2048.0);
     }
 
     float metalness = 0.0;
-    if (useMetalMap == 1) {
+    if (useMetalMap == 1 && lod == 0) {
         metalness = texture(metalnessMap, fragUV).r;
     }
 
@@ -193,69 +197,97 @@ vec3 applyLighting(vec3 baseColor, vec3 matAmbient, vec3 matDiffuse, vec3 matSpe
     vec3 metallicDiffuse = matDiffuse * (1.0 - metalness);
 
     float ao = 1.0;
-    if (useAOMap == 1) {
+    if (useAOMap == 1 && lod == 0) {
         ao = texture(aoMap, fragUV).r;
     }
 
     vec3 viewDir = normalize(cameraPos - fragPos);
-    vec3 resolvedSpecular = useSpecularMap == 1 ? texture(specularMap, fragUV).rgb : metallicSpecular;
-    vec3 ambient = dirLight.ambient * matAmbient * baseColor * ao;
+    vec3 resolvedSpecular = (useSpecularMap == 1 && lod == 0) ? texture(specularMap, fragUV).rgb : metallicSpecular;
+    float normalFacing = max(dot(norm, normalize(-dirLight.direction)), 0.0);
+    vec3 ambient = dirLight.ambient * matAmbient * baseColor * ao * (1.0 + 0.4 * normalFacing);
     vec3 result = ambient;
 
     // directional light
     if (dirLight.enabled == 1) {
         vec3 lightDir = normalize(-dirLight.direction);
-        float diff = max(dot(norm, lightDir), 0.0);
+        vec3 geoNorm = normalize(fragNormal);
+        float geoDot = dot(geoNorm, lightDir);
+        float horizonMask = clamp(geoDot / 0.2, 0.0, 1.0);
+        float diff = max(dot(norm, lightDir), 0.0) * horizonMask;
         vec3 diffuse = diff * metallicDiffuse * baseColor * dirLight.color;
 
         vec3 specular = vec3(0.0);
-        if (diff > 0.0) {
+        if (diff > 0.0 && lod < 2) {
             vec3 halfDir = normalize(lightDir + viewDir);
             float spec = pow(max(dot(norm, halfDir), 0.0), effectiveShininess);
-            specular = spec * resolvedSpecular * dirLight.color;
+            float specOcclusion = ao * ao;
+            specular = spec * resolvedSpecular * dirLight.color * specOcclusion;
         }
 
         float pointLightFill = 0.0;
-        for (int i = 0; i < numPointLights; i++) {
-            vec3 lightVec = pointLights[i].position - fragPos;
-            float dist = length(lightVec);
-            float atten = clamp(1.0 - (dist / pointLights[i].range), 0.0, 1.0);
-            atten *= atten;
-            pointLightFill = max(pointLightFill, atten * pointLights[i].intensity);
+        if (lod < 2) {
+            for (int i = 0; i < numPointLights; i++) {
+                vec3 lightVec = pointLights[i].position - fragPos;
+                float dist = length(lightVec);
+                float atten = clamp(1.0 - (dist / pointLights[i].range), 0.0, 1.0);
+                atten *= atten;
+                pointLightFill = max(pointLightFill, atten * pointLights[i].intensity);
+            }
         }
 
-        float visibility = (dirLight.passShadow == 1) ? computeShadow(fragPosLightSpace, norm, lightDir) : 1.0;
+        float visibility = 1.0;
+        if (dirLight.passShadow == 1) {
+            if (lod == 0) {
+                visibility = computeShadow(fragPosLightSpace, norm, lightDir);
+            } else if (lod == 1) {
+                vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+                projCoords = projCoords * 0.5 + 0.5;
+                visibility = (projCoords.z <= 1.0) ? texture(shadowMap, vec3(projCoords.xy, projCoords.z - 0.005)) : 1.0;
+            }
+        }
+
         visibility = max(visibility, clamp(pointLightFill, 0.0, 1.0));
         result += visibility * (diffuse + specular);
     }
 
-    // point lights
-    for (int i = 0; i < numPointLights; i++) {
-        vec3 lightVec = pointLights[i].position - fragPos;
-        float dist = length(lightVec);
-        vec3 plLightDir = normalize(lightVec);
-        float plDiff = max(dot(norm, plLightDir), 0.0);
-        vec3 plDiffuse = plDiff * metallicDiffuse * baseColor;
-        vec3 plSpecular = vec3(0.0);
-        if (plDiff > 0.0) {
-            vec3 plHalfDir = normalize(plLightDir + viewDir);
-            float plSpec = pow(max(dot(norm, plHalfDir), 0.0), effectiveShininess);
-            plSpecular = plSpec * resolvedSpecular;
+    if (lod < 2) {
+        for (int i = 0; i < numPointLights; i++) {
+            vec3 lightVec = pointLights[i].position - fragPos;
+            float dist = length(lightVec);
+            vec3 plLightDir = normalize(lightVec);
+            vec3 geoNorm = normalize(fragNormal);
+            float geoDot = dot(geoNorm, plLightDir);
+            float horizonMask = clamp(geoDot / 0.2, 0.0, 1.0);
+            float plDiff = max(dot(norm, plLightDir), 0.0) * horizonMask;
+            vec3 plDiffuse = plDiff * metallicDiffuse * baseColor;
+            vec3 plSpecular = vec3(0.0);
+            if (plDiff > 0.0 && lod == 0) {
+                vec3 plHalfDir = normalize(plLightDir + viewDir);
+                float plSpec = pow(max(dot(norm, plHalfDir), 0.0), effectiveShininess);
+                float specOcclusion = ao * ao;
+                plSpecular = plSpec * resolvedSpecular * specOcclusion;
+            }
+
+            float linear = 2.0 / pointLights[i].range;
+            float quadratic = 1.0 / (pointLights[i].range * pointLights[i].range);
+            float attenuation = 1.0 / (1.0 + linear * dist + quadratic * dist * dist);
+            attenuation *= clamp(1.0 - (dist / pointLights[i].range), 0.0, 1.0);
+
+            result += (plDiffuse + plSpecular) * attenuation * pointLights[i].intensity * pointLights[i].color;
         }
-
-        float linear = 2.0 / pointLights[i].range;
-        float quadratic = 1.0 / (pointLights[i].range * pointLights[i].range);
-        float attenuation = 1.0 / (1.0 + linear * dist + quadratic * dist * dist);
-        attenuation *= clamp(1.0 - (dist / pointLights[i].range), 0.0, 1.0);
-
-        result += (plDiffuse + plSpecular) * attenuation * pointLights[i].intensity * pointLights[i].color;
     }
 
+
     result = mix(result, result * ao, 0.5);
+    float fresnel = pow(1.0 - max(dot(norm, viewDir), 0.0), 2);
+    vec3 fresnelColor = fresnel * resolvedSpecular * skycolor * 0.5;
+    result += fresnelColor;
     return result;
 }
 
 void main() {
+    float camDist = length(cameraPos - fragPos);
+    int lod = (camDist < 25.0) ? 0 : (camDist < 50.0) ? 1 : 2;
     vec4 base = useInstancing == 1 ? instanceColor : color;
     if (useTexture == 1) {
         float tileSize = 1.0 / float(atlasSize);
@@ -289,15 +321,14 @@ void main() {
     }
     if (alpha < 0.02) discard;
 
-    if (applyLight == 1) base.rgb = applyLighting(base.rgb, matAmbient, matDiffuse, matSpecular, matShininess);
+    if (applyLight == 1) base.rgb = applyLighting(base.rgb, matAmbient, matDiffuse, matSpecular, matShininess, lod);
     float fogFactor = computeFog();
     vec3 camViewDir = normalize(fragPos - cameraPos);
     vec3 litFogColor = computeFogColor(camViewDir, fogFactor);
     vec3 finalColor = mix(litFogColor, base.rgb, fogFactor);
     vec3 emissive = matEmissive;
     if (useEmissiveMap == 1) {
-        vec3 sampled = texture(emissiveMap, fragUV).rgb;
-        emissive = length(sampled) < 0.001 ? finalColor : sampled;
+        emissive = texture(emissiveMap, fragUV).rgb;
     }
     finalColor += emissive * matEmStrength;
 
@@ -315,5 +346,8 @@ void main() {
         FragColor = vec4(finalColor, alpha);
         return;
     }
+    vec3 dither = vec3(dot(vec2(171.0, 231.0), gl_FragCoord.xy));
+    dither = fract(dither / vec3(103.0, 71.0, 97.0)) / 255.0 - (0.5 / 255.0);
+    finalColor += dither;
     FragColor = vec4(finalColor, alpha);
 }

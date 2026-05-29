@@ -6,24 +6,26 @@ import org.sharkk2.shrkengine.engine.Camera;
 import org.sharkk2.shrkengine.engine.Engine;
 import org.sharkk2.shrkengine.engine.LightManager;
 import org.sharkk2.shrkengine.engine.ShaderLoader;
-import org.sharkk2.shrkengine.engine.classes.Entity3D;
+import org.sharkk2.shrkengine.engine.classes.WorldEntity;
 import org.sharkk2.shrkengine.engine.classes.Scene;
 
 import static org.lwjgl.glfw.GLFW.glfwGetTime;
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL43.*;
 
-public class Quad extends Entity3D {
+public class Quad extends WorldEntity {
     // behold, the fattest constructor and global variables
     private static int vao;
     private static int vboVertices;
     private static int vboUV;
     private static int vboNormals;
     private static boolean initialized = false;
-    private int textureID = -1;
-    private int ntextureID = -1;
-    private int textureNum = -1;
     private float textureScale = -1f;
     private final Camera camera;
+    private final LightManager lightManager;
+    private final Vector4f matPropsBuffer = new Vector4f();
+    private final Matrix4f projMatrix;
+    private final Matrix4f viewMatrix;
+
 
     public static final float[] vertices = {
             -0.5f, -0.5f,  0.5f,
@@ -39,7 +41,12 @@ public class Quad extends Entity3D {
 
     public Quad(Engine engine) {
         super(engine);
+        entityType = EntityType.QUAD;
+
         camera = engine.getCamera();
+        lightManager = engine.getLightManager();
+        projMatrix = camera.getProjectionMatrix();
+        viewMatrix = camera.getViewMatrix();
         if (!initialized) {
             vao = glGenVertexArrays();
             glBindVertexArray(vao);
@@ -65,9 +72,7 @@ public class Quad extends Entity3D {
         shader = ShaderLoader.get("shaders/entities/entity.vert", "shaders/entities/entity.frag");
         model = new Matrix4f()
                 .translate(x, y, z)
-                .rotateXYZ((float)Math.toRadians(angleX),
-                        (float)Math.toRadians(angleY),
-                        (float)Math.toRadians(angleZ))
+                .rotate(rotation)
                 .scale(w, h, d);
         computeBounds(vertices);
     }
@@ -81,37 +86,24 @@ public class Quad extends Entity3D {
         shader.use();
         glBindVertexArray(vao);
 
-        Camera camera = engine.getCamera();
-        Matrix4f projection = camera.getProjectionMatrix();
-        Matrix4f view = camera.getViewMatrix();
-
+        camera.getViewMatrix(viewMatrix);
+        camera.getProjectionMatrix(projMatrix);
         shader.setMat4("model", model);
-        shader.setMat4("projection", projection);
-        shader.setMat4("view", view);
+        shader.setMat4("projection", projMatrix);
+        shader.setMat4("view", viewMatrix);
         shader.setVec4("color", getColorRGBA());
         shader.setInt("useInstancing", 0);
         shader.setInt("atlasSize", engine.getTextureLoader().getAtlasSize());
         shader.setInt("textureIndex", textureNum);
         shader.setFloat("utime", (float)glfwGetTime());
         shader.setInt("useColorMask", 0);
-        shader.setInt("numPointLights", engine.getLightManager().getPointLights().size());
-        shader.setVec3("cameraPos", camera.getPosition());
         shader.setVec3("material.ambient", material.ambient);
         shader.setVec3("material.diffuse", material.diffuse);
         shader.setVec3("material.specular", material.specular);
         shader.setVec3("material.emissive", material.emissive);
-        shader.setVec4("material.matProps", new Vector4f(material.shininess, material.applyLight?1:0, material.rainbowEffect?1:0, material.emissiveStrength));
+        matPropsBuffer.set(material.shininess, material.applyLight?1:0, material.rainbowEffect?1:0, material.emissiveStrength);
+        shader.setVec4("material.matProps", matPropsBuffer);
         Scene currentScene = engine.getWorld().getCurrentScene();
-        shader.setVec3("dirLight.direction", currentScene.globalSceneLight.direction);
-        shader.setVec3("dirLight.color", currentScene.globalSceneLight.color);
-        shader.setVec3("dirLight.ambient", currentScene.globalSceneLight.ambient);
-        shader.setInt("dirLight.enabled", currentScene.globalSceneLight.enabled? 1:0);
-        shader.setInt("dirLight.passShadow", currentScene.globalSceneLight.castShadow? 1:0);
-        shader.setVec3("fog.color", currentScene.sceneFog.color);
-        shader.setFloat("fog.start", currentScene.sceneFog.start);
-        shader.setFloat("fog.end", currentScene.sceneFog.end);
-        shader.setFloat("fog.density", currentScene.sceneFog.density);
-        shader.setInt("fog.mode", currentScene.sceneFog.mode);
         shader.setInt("useSpecularMap", 0);
         shader.setInt("useNormalMap", 0);
         shader.setInt("useAOMap", 0);
@@ -121,49 +113,46 @@ public class Quad extends Entity3D {
         shader.setInt("useEmissiveMap", 0);
 
         shader.setFloat("textureScale", textureScale);
-        for (int i = 0; i < engine.getLightManager().getPointLights().size(); i++) {
-            LightManager.PointLight light = engine.getLightManager().getPointLights().get(i);
-            shader.setVec3("pointLights[" + i + "].position", light.position);
-            shader.setVec3("pointLights[" + i + "].color", light.color);
-            shader.setFloat("pointLights[" + i + "].range", light.lightRange);
-            shader.setFloat("pointLights[" + i + "].intensity", light.intensity);
-        }
+        engine.getRenderer().uploadLightData(shader);
 
+
+        int unit = 0;
         boolean hasTexture = textureID != -1;
         shader.setInt("useTexture", hasTexture? 1 : 0);
         if (hasTexture) {
-            glActiveTexture(GL_TEXTURE0);
+            glActiveTexture(GL_TEXTURE0 + unit);
             glBindTexture(GL_TEXTURE_2D, textureID);
-            shader.setInt("texSampler", 0);
+            shader.setInt("texSampler", unit);
             if (textureNum == -1) {
                 shader.setInt("textureIndex", 0);
                 shader.setInt("atlasSize", 1);
             }
+            unit++;
         }
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, currentScene.globalSceneLight.shadowMap.depthTexture);
-        shader.setInt("shadowMap", 1);
+        glActiveTexture(GL_TEXTURE20);
+        glBindTexture(GL_TEXTURE_2D, lightManager.shadowMap.depthTexture);
+        shader.setInt("shadowMap", 20);
         shader.setMat4("lightSpaceMatrix", currentScene.globalSceneLight.getLightSpace(engine));
+        unit++;
 
         boolean hasNormal = ntextureID != -1;
         if (hasNormal) {
-            glActiveTexture(GL_TEXTURE2);
+            glActiveTexture(GL_TEXTURE0 + unit);
             glBindTexture(GL_TEXTURE_2D, ntextureID);
-            shader.setInt("normalMap", 2);
+            shader.setInt("normalMap", unit);
             shader.setInt("useNormalMap", 1);
+            unit++;
         }
 
-        engine.onEntity3DRender(this);
+        engine.getRenderer().uploadSceneData(shader, currentScene);
+
+        engine.onWorldEntityRender(this);
 
         glDrawArrays(GL_TRIANGLES, 0, 6);
         return true;
     }
 
-    @Override
-    public void handleInput(Runnable action) {if (action != null) action.run();}
 
-    @Override
-    public void update(Runnable action) {if (action != null) action.run();}
 
     @Override
     public void applyTexture(int texNum) {
@@ -172,13 +161,7 @@ public class Quad extends Entity3D {
         textureNum = texNum;
     }
 
-    public void applyTexture(String texPath, int type) {
-        if (engine.getTextureLoader() == null) return;
-        switch (type) {
-            case 0: textureID = engine.getTextureLoader().loadTexture(texPath); break;
-            case 1: ntextureID = engine.getTextureLoader().loadTexture(texPath);
-        }
-    }
+
 
     @Override
     protected void onDestroy() {}
@@ -195,11 +178,11 @@ public class Quad extends Entity3D {
         }
     }
 
-    public int getTextureID() {return textureID;}
-    public int getTextureNum() {return textureNum;}
     public int getVboUV() {return vboUV;}
     public float[] getUVs() {return uvs;}
     public int getVao() {return vao;}
     public void setTextureScale(float v) {this.textureScale = getWidth() / v;}
+    public int getNormalTextureID() {return ntextureID;}
+
 
 }

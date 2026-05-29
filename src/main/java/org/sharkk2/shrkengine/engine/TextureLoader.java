@@ -1,17 +1,21 @@
 package org.sharkk2.shrkengine.engine;
 
 import org.lwjgl.BufferUtils;
+import org.sharkk2.shrkengine.engine.helpers.Utils;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.nio.ByteBuffer;
+import java.nio.FloatBuffer;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL43.*;
 
 public class TextureLoader {
 
@@ -170,18 +174,58 @@ public class TextureLoader {
 
             int texID = glGenTextures();
             glBindTexture(GL_TEXTURE_2D, texID);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0,
-                    GL_RGBA, GL_UNSIGNED_BYTE, buffer);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
             textureCache.put(path, texID);
+            System.out.println("[Texture loader] Loaded texture from " + path + " to (" + texID  + ")");
             return texID;
         } catch (IOException e) {
             throw new RuntimeException("Failed to load texture: " + path, e);
         }
+    }
+
+    public int load3DLutTexture(String path) {
+        if (textureCache.containsKey(path)) {
+            return textureCache.get(path);
+        }
+        List<Float> values = new ArrayList<>();
+        int size = 0;
+        try {
+            for (String line : Files.readAllLines(Paths.get(path))) {
+                line = line.trim();
+
+                if (line.startsWith("LUT_3D_SIZE")) {
+                    size = Integer.parseInt(line.split(" ")[1]);
+                } else if (!line.isEmpty() && Character.isDigit(line.charAt(0))) {
+                    String[] p = line.split("\\s+");
+                    values.add(Float.parseFloat(p[0]));
+                    values.add(Float.parseFloat(p[1]));
+                    values.add(Float.parseFloat(p[2]));
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to load LUT texture: " + e.getMessage());
+            return -1;
+        }
+
+        FloatBuffer buffer = BufferUtils.createFloatBuffer(values.size()); // less headache
+        for (float f : values) {buffer.put(f);}
+        buffer.flip();
+
+        int texID = glGenTextures();
+        glBindTexture(GL_TEXTURE_3D, texID);
+        glTexImage3D(GL_TEXTURE_3D, 0, GL_RGB16F, size, size, size, 0, GL_RGB, GL_FLOAT, buffer);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+        textureCache.put(path, texID);
+        return texID;
     }
 
     public void clearCache() {

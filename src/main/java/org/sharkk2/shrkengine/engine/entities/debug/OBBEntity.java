@@ -7,9 +7,9 @@ import org.sharkk2.shrkengine.engine.Camera;
 import org.sharkk2.shrkengine.engine.Engine;
 import org.sharkk2.shrkengine.engine.ShaderLoader;
 import org.sharkk2.shrkengine.engine.classes.DebugEntity;
-import org.sharkk2.shrkengine.engine.classes.Entity3D;
+import org.sharkk2.shrkengine.engine.classes.WorldEntity;
 
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL43.*;
 
 public class OBBEntity extends DebugEntity {
     private static int vao;
@@ -25,15 +25,18 @@ public class OBBEntity extends DebugEntity {
             0.5f, 0.5f, -0.5f,  // 5
             0.5f, 0.5f, 0.5f,  // 6
             -0.5f, 0.5f, 0.5f,  // 7
+            0,0,0,
+            0,0,1
     };
 
     private static final int[] INDICES = {
             0,1, 1,2, 2,3, 3,0,  // bottom
             4,5, 5,6, 6,7, 7,4,  // top
             0,4, 1,5, 2,6, 3,7,   // verticals
+            8,9
     };
 
-    public OBBEntity(Engine engine, Entity3D target) {
+    public OBBEntity(Engine engine, WorldEntity target) {
         super(engine, target);
 
         if (!initialized) {
@@ -60,7 +63,7 @@ public class OBBEntity extends DebugEntity {
     public boolean doRender() {
         if (!target.isAlive() || !target.isVisible()) return false;
 
-        Entity3D.OBB obb = target.getOBB();
+        WorldEntity.OBB obb = target.getOBB();
         Vector3f ex = new Vector3f(obb.axisX()).mul(obb.halfExtents().x * 2);
         Vector3f ey = new Vector3f(obb.axisY()).mul(obb.halfExtents().y * 2);
         Vector3f ez = new Vector3f(obb.axisZ()).mul(obb.halfExtents().z * 2);
@@ -107,9 +110,12 @@ public class OBBEntity extends DebugEntity {
         shader.setFloat("fog.end", 100000f);
         shader.setFloat("fog.density", 0f);
         shader.setInt("fog.mode", 0);
-        shader.setInt("shadowMap", 1);
         glLineWidth(1.5f);
-        glDrawElements(GL_LINES, INDICES.length, GL_UNSIGNED_INT, 0);
+        glDrawElements(GL_LINES, INDICES.length - 2, GL_UNSIGNED_INT, 0);
+        shader.setVec4("color", new Vector4f(1, 0, 0, 1));
+      //  model.rotateXYZ(target.getRotation(true));
+        shader.setMat4("model", model);
+        glDrawElements(GL_LINES, 2, GL_UNSIGNED_INT, (long)(INDICES.length - 2) * Integer.BYTES);
         return true;
     }
 

@@ -1,15 +1,15 @@
 package org.sharkk2.shrkengine.engine.entities;
 
 import static org.lwjgl.glfw.GLFW.*;
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL43.*;
 
 import org.sharkk2.shrkengine.engine.Engine;
 import org.sharkk2.shrkengine.engine.Input;
 import org.sharkk2.shrkengine.engine.ShaderLoader;
-import org.sharkk2.shrkengine.engine.classes.Entity2D;
+import org.sharkk2.shrkengine.engine.classes.SpriteEntity;
 import org.sharkk2.shrkengine.engine.helpers.Utils;
 
-public class Quadrilateral extends Entity2D {
+public class Quadrilateral extends SpriteEntity {
     private final int vao;
     private final ShaderLoader.Shader shader;
     private int vboUV = 0;
@@ -89,12 +89,30 @@ public class Quadrilateral extends Entity2D {
             shader.setInt("texSampler", 0);
         }
 
-        engine.onEntity2DRender(this);
+        engine.onSpriteEntityRender(this);
 
         glDrawArrays(GL_TRIANGLES, 0, 6);
         return true;
     }
 
+    public void applyTexture(String texPath) {
+        if (engine.getTextureLoader() == null) return;
+        textureID = engine.getTextureLoader().loadTexture(texPath);
+        uvs = new float[]{
+                0,1,
+                1,1,
+                1,0,
+                1,0,
+                0,0,
+                0,1
+        };
+
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, vboUV);
+        glBufferData(GL_ARRAY_BUFFER, uvs, GL_DYNAMIC_DRAW);
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, 2 * Float.BYTES, 0);
+        glEnableVertexAttribArray(1);
+    }
 
 
     public void applyTexture(int textureNumber) {
@@ -113,34 +131,6 @@ public class Quadrilateral extends Entity2D {
     }
 
 
-    @Override
-    public void update(Runnable action) {
-        timer += 0.01f;
-
-        if (shouldBounce) makeItBounce();
-        if (action != null) {
-            action.run();
-        }
-    }
-
-    @Override
-    public void handleInput(Runnable action) {
-        if (action != null) action.run();
-        else {
-            if (Input.isKeyDown(GLFW_KEY_W)) y -= speed * engine.getDeltaTime();
-            if (Input.isKeyDown(GLFW_KEY_S)) y += speed * engine.getDeltaTime();
-            if (Input.isKeyDown(GLFW_KEY_D)) x += speed * engine.getDeltaTime();
-            if (Input.isKeyDown(GLFW_KEY_A)) x -= speed * engine.getDeltaTime();
-
-            float halfW = w * 0.5f;
-            float halfH = h * 0.5f;
-            if (x - halfW < 0f) x = halfW;
-            if (x + halfW > engine.windowWidth) x = engine.windowWidth - halfW;
-            if (y - halfH < 0f) y = halfH;
-            if (y + halfH > engine.windowHeight) y = engine.windowHeight - halfH;
-        }
-
-    }
 
     @Override
     public void onDestroy() {}

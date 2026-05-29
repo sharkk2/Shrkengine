@@ -3,18 +3,13 @@ package org.sharkk2.shrkengine.engine.entities.debug;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
-import org.lwjgl.BufferUtils;
 import org.sharkk2.shrkengine.engine.Camera;
 import org.sharkk2.shrkengine.engine.Engine;
 import org.sharkk2.shrkengine.engine.ShaderLoader;
 import org.sharkk2.shrkengine.engine.classes.DebugEntity;
-import org.sharkk2.shrkengine.engine.classes.Entity3D;
-import org.sharkk2.shrkengine.engine.classes.Model;
-import org.sharkk2.shrkengine.engine.entities.Mesh;
+import org.sharkk2.shrkengine.engine.classes.WorldEntity;
 
-import java.nio.FloatBuffer;
-
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL43.*;
 
 public class AABBEntity extends DebugEntity {
     private static int vao;
@@ -31,18 +26,16 @@ public class AABBEntity extends DebugEntity {
             0.5f, 0.5f, -0.5f,  // 5
             0.5f, 0.5f, 0.5f,  // 6
             -0.5f, 0.5f, 0.5f,  // 7
-            0,0,0,
-            0,0,1
+
     };
 
     private static final int[] INDICES = {
             0,1, 1,2, 2,3, 3,0,  // bottom
             4,5, 5,6, 6,7, 7,4,  // top
             0,4, 1,5, 2,6, 3,7,   // verticals
-            8,9
     };
 
-    public AABBEntity(Engine engine, Entity3D target) {
+    public AABBEntity(Engine engine, WorldEntity target) {
         super(engine, target);
 
         if (!initialized) {
@@ -69,7 +62,7 @@ public class AABBEntity extends DebugEntity {
     public boolean doRender() {
         if (!target.isAlive() || !target.isVisible()) return false;
 
-        Entity3D.AABB aabb = target.getAABB();
+        WorldEntity.AABB aabb = target.getAABB();
 
         Vector3f center = new Vector3f(aabb.min()).add(aabb.max()).mul(0.5f);
         Vector3f size = new Vector3f(aabb.max()).sub(aabb.min());
@@ -111,13 +104,8 @@ public class AABBEntity extends DebugEntity {
         shader.setFloat("fog.end", 100000f);
         shader.setFloat("fog.density", 0f);
         shader.setInt("fog.mode", 0);
-        shader.setInt("shadowMap", 1);
         glLineWidth(1.5f);
-        glDrawElements(GL_LINES, INDICES.length - 2, GL_UNSIGNED_INT, 0);
-        shader.setVec4("color", new Vector4f(1, 0, 0, 1));
-        model.rotateXYZ(target.getRotation(true));
-        shader.setMat4("model", model);
-        glDrawElements(GL_LINES, 2, GL_UNSIGNED_INT, (long)(INDICES.length - 2) * Integer.BYTES);
+        glDrawElements(GL_LINES, INDICES.length, GL_UNSIGNED_INT, 0);
         return true;
     }
 

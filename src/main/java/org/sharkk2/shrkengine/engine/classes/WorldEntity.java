@@ -1,27 +1,29 @@
 package org.sharkk2.shrkengine.engine.classes;
 
 import org.joml.Matrix4f;
+import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
 import org.sharkk2.shrkengine.engine.Engine;
 import org.sharkk2.shrkengine.engine.LightManager;
 import org.sharkk2.shrkengine.engine.ShaderLoader;
-import org.sharkk2.shrkengine.engine.entities.Cube;
+import org.sharkk2.shrkengine.engine.classes.gizmos.Transformer;
 import org.sharkk2.shrkengine.engine.entities.Mesh;
 import org.sharkk2.shrkengine.engine.entities.debug.AABBEntity;
 import org.sharkk2.shrkengine.engine.entities.debug.OBBEntity;
 import org.sharkk2.shrkengine.engine.helpers.Utils;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public abstract class Entity3D {
+public abstract class WorldEntity {
     protected final Engine engine;
     private static final AtomicInteger ID_COUNTER = new AtomicInteger(0);
     protected String id;
     protected ShaderLoader.Shader shader;
-    protected float ogX = Float.NaN;
-    protected float ogY = Float.NaN;
-    protected float ogZ = Float.NaN;
+    protected Vector3f originalPosition = null;
+    protected Runnable updateScript;
     protected float x = 0;
     protected float y = 0;
     protected float z = 0;
@@ -32,13 +34,18 @@ public abstract class Entity3D {
     protected float w=1;
     protected float h=1;
     protected float d=1;
-    protected float angleX;
-    protected float angleY;
+    protected int textureID = -1;
+    protected int ntextureID = -1;
+    protected int textureNum = -1;
+    protected float angleX, angleY, angleZ;
+    protected Quaternionf rotation = new Quaternionf();
+    private final Vector3f eulerCache = new Vector3f();
+    protected boolean eulerDirty = true;
     protected boolean visible = true;
-    protected float angleZ;
     protected boolean alive = true;
-    protected int debugStage = 0;
-    protected Matrix4f model;
+    protected boolean outlined = false;
+    protected List<Integer> debugFlags = new ArrayList<>();
+    protected Matrix4f model = new Matrix4f();
     protected LightManager.PointLight light;
     public final Material material = new Material();
     private final Vector3f localMin = new Vector3f(Float.MAX_VALUE);
@@ -46,16 +53,39 @@ public abstract class Entity3D {
     // debug entities
     private final AABBEntity aabbEntity;
     private final OBBEntity obbEntity;
-
-
-    public static final int DEBUG_STAGE_OFF = 0;
+    private final Transformer transformer;
+    public static boolean suppressDebug = false; // suppress lol "this was added to prevent stackoverflow errs"
     public static final int DEBUG_STAGE_AABB = 1;
     public static final int DEBUG_STAGE_OBB = 2;
     public static final int DEBUG_STAGE_FULL_OBB = 3;
     public static final int DEBUG_STAGE_FRAME = 4;
+    public static final int DEBUG_STAGE_LAST = 4;
+    public enum EntityType {CUBE, MODEL, PARTICLE_EMITTER, SPHERE, QUAD, OTHER, MESH}
+    public enum EntityEvent {
+        POSITION_CHANGE,
+        ROTATION_CHANGE,
+        SIZE_CHANGE,
+        COLOR_CHANGE,
+        ID_CHANGE,
+        SCRIPT_CHANGE,
+        LIGHT_ATTACHED,
+        LIGHT_DETACHED,
+        NIGGAFIED, DENIGGAFIED,
+        MARKED_VISIBLE,
+        MARKED_INVISIBLE,
+        DEBUGGED,
+        KILLED,
+        SHADER_CHANGE,
+        TEXTURE_CHANGE
+    }
+    public EntityType entityType;
+    public boolean anchored = true;
+    public boolean castShadow = true;
+    private OBB cachedOBB = null; // fuck the GC for having to me do all of this shit
+    private Matrix4f lastOBBModel = null;
+    public boolean reportEvents = true;
 
     public record AABB(Vector3f min, Vector3f max, String entityID) {
-
         public boolean intersects(AABB n) {
             return min.x < n.max.x && max.x > n.min.x &&
                     min.y < n.max.y && max.y > n.min.y &&
@@ -99,13 +129,25 @@ public abstract class Entity3D {
     }
 
 
-    protected Entity3D(Engine engine) {
+    protected WorldEntity(Engine engine) {
+        entityType = EntityType.OTHER;
         this.id = getClass().getSimpleName() + "_" + ID_COUNTER.getAndIncrement();
         this.engine = engine;
-        this.aabbEntity = new AABBEntity(engine, this);
-        this.obbEntity = new OBBEntity(engine, this);
+      //  this.transformer = null;
+
+        if (suppressDebug) {
+            this.aabbEntity = null;
+            this.obbEntity = null;
+            this.transformer = null;
+
+        } else {
+            this.aabbEntity = new AABBEntity(engine, this);
+            this.obbEntity = new OBBEntity(engine, this);
+           this.transformer = new Transformer(engine, this);
+        }
 
     }
+
 
     public static class Material {
         public Vector3f ambient = new Vector3f(1,1,1);
@@ -124,7 +166,7 @@ public abstract class Entity3D {
             emissive.set(eR, eG, eB);
             this.shininess = shininess;
             this.applyLight = applyLight;
-            this.emissiveStrength = 1;
+            this.emissiveStrength = emissiveStrength;
             return this;
         }
 
@@ -153,12 +195,13 @@ public abstract class Entity3D {
         public void setRainbowEffect(boolean v) {rainbowEffect = v;}
     }
 
-    public abstract void handleInput(Runnable action);
-    public abstract void update(Runnable action);
     protected abstract boolean doRender();
     public abstract void applyTexture(int texNum);
     protected abstract void onDestroy();
     public abstract void cleanup();
+
+    public void update() {if (updateScript != null) updateScript.run();}
+    public void script(Runnable r) {this.updateScript = r; registerEvent(EntityEvent.SCRIPT_CHANGE);}
 
     protected void computeBounds(float[] positions) {
         for (int i = 0; i < positions.length; i += 3) {
@@ -167,90 +210,210 @@ public abstract class Entity3D {
         }
     }
     public final void destroy() {
+        visible = false;
         if (!alive) return;
         alive = false;
+
+        if (transformer != null) transformer.cleanup();
+        if (light != null) engine.getLightManager().removePointLight(light);
         onDestroy();
+        registerEvent(EntityEvent.KILLED);
+
     }
 
-    public final boolean debugRender(boolean justOBB) {
-        if (justOBB) return obbEntity.render();
+
+    public final boolean debugRender(int[] flags) {
+        if (flags.length == 0) return false;
         boolean s = true;
-        if (debugStage == 1) aabbEntity.render();
-        else if (debugStage == 2) {
-            aabbEntity.render();
-            obbEntity.render();
-        }
-        else if (debugStage >= 3) {
-            aabbEntity.render();
-            if (this instanceof Model m) {
-                obbEntity.render();
-                for (Mesh mesh : m.getChildren()) {
-                    s &= mesh.debugRender(true);
-                }
-            } else s &= obbEntity.render();
+        for (int flag : flags) {
+            if (flag == DEBUG_STAGE_AABB) s &= aabbEntity.render();
+            else if (flag == DEBUG_STAGE_OBB) s &= obbEntity.render();
+            else if (flag == DEBUG_STAGE_FULL_OBB) {
+                if (this instanceof Model m) {
+                    obbEntity.render();
+                    for (Mesh mesh : m.getChildren()) {
+                        int[] sflag = {DEBUG_STAGE_OBB};
+                        s &= mesh.debugRender(sflag);
+                    }
+                } else s &= obbEntity.render();
+            }
         }
         return s;
     }
 
-    public final boolean render() {return doRender();}
+    public final boolean debugRender() {
+        if (debugFlags == null) return false;
+        if (debugFlags.isEmpty()) return false;
+        boolean s = true;
+        for (int flag : debugFlags) {
+            if (flag == DEBUG_STAGE_AABB) s &= aabbEntity.render();
+            else if (flag == DEBUG_STAGE_OBB) s &= obbEntity.render();
+            else if (flag == DEBUG_STAGE_FULL_OBB) {
+                if (this instanceof Model m) {
+                    obbEntity.render();
+                    for (Mesh mesh : m.getChildren()) {
+                        int[] sflag = {DEBUG_STAGE_OBB};
+                        s &= mesh.debugRender(sflag);
+                    }
+                } else s &= obbEntity.render();
+            }
+        }
+        return s;
+    }
+
+    public final boolean render() {
+        return doRender();
+    }
 
     public final boolean isAlive() {
         return alive;
     }
     public void setPosition(float x, float y, float z) {
-        engine.getWorld().getCurrentScene().worldPosMap.remove(this.x +":"+this.y+":"+this.z);
         this.x = x;
         this.y = y;
         this.z = z;
-        if (Float.isNaN(ogX)) {
-           this.ogX = x; this.ogY = y; this.ogZ = z;
+        if (originalPosition == null) {
+            originalPosition = new Vector3f(x, y, z);
         }
         if (light != null) {light.position = new Vector3f(x,y,z);}
-        engine.getWorld().getCurrentScene().worldPosMap.put(this.x +":"+this.y+":"+this.z, this);
+        registerEvent(EntityEvent.POSITION_CHANGE);
+    }
+
+    private Vector3f getEulerDegrees() {
+        if (eulerDirty) {
+            rotation.getEulerAnglesXYZ(eulerCache);
+            eulerCache.set(
+                    (float) Math.toDegrees(eulerCache.x),
+                    (float) Math.toDegrees(eulerCache.y),
+                    (float) Math.toDegrees(eulerCache.z)
+            );
+            eulerDirty = false;
+        }
+        return eulerCache;
+    }
+
+
+    public void setRotation(float angleX, float angleY, float angleZ) {
+        this.angleX = angleX;
+        this.angleY = angleY;
+        this.angleZ = angleZ;
+        rotation.identity()
+                .rotateY((float) Math.toRadians(angleY))
+                .rotateX((float) Math.toRadians(angleX))
+                .rotateZ((float) Math.toRadians(angleZ));
+        eulerDirty = true;
+        registerEvent(EntityEvent.ROTATION_CHANGE);
+
+    }
+
+    public void setRotation(Quaternionf q) {
+        rotation.set(q);
+        // Only extract Euler here since we have no other source
+        Vector3f e = new Vector3f();
+        q.getEulerAnglesXYZ(e);
+        angleX = (float) Math.toDegrees(e.x);
+        angleY = (float) Math.toDegrees(e.y);
+        angleZ = (float) Math.toDegrees(e.z);
+        eulerDirty = true;
+        registerEvent(EntityEvent.ROTATION_CHANGE);
+
+    }
+
+    public void rotate(float dx, float dy, float dz) {
+        angleX += dx;
+        angleY += dy;
+        angleZ += dz;
+        rotation.identity()
+                .rotateY((float) Math.toRadians(angleY))
+                .rotateX((float) Math.toRadians(angleX))
+                .rotateZ((float) Math.toRadians(angleZ));
+        eulerDirty = true;
+        registerEvent(EntityEvent.ROTATION_CHANGE);
+    }
+
+
+
+    public final float getAngleX() { return angleX; }
+    public final float getAngleY() { return angleY; }
+    public final float getAngleZ() { return angleZ; }
+
+    public Quaternionf getRotation() { return rotation; }
+
+    public Vector3f getRotation(boolean radians) {
+        Vector3f deg = getEulerDegrees();
+        if (radians) return new Vector3f(
+                (float) Math.toRadians(deg.x),
+                (float) Math.toRadians(deg.y),
+                (float) Math.toRadians(deg.z)
+        );
+        return deg;
+    }
+
+
+
+    public String posKey() {return x + ":" + y + ":" + z;}
+    public void applyTexture(String texPath, int type) {
+        registerEvent(EntityEvent.TEXTURE_CHANGE);
+        if (engine.getTextureLoader() == null) return;
+        switch (type) {
+            case 0: textureID = engine.getTextureLoader().loadTexture(texPath); break;
+            case 1: ntextureID = engine.getTextureLoader().loadTexture(texPath);
+        }
+        textureNum = -1;
     }
 
     public void setSize(float w, float h, float d) {
         this.w = w;
         this.h = h;
         this.d = d;
+        registerEvent(EntityEvent.SIZE_CHANGE);
+
     }
 
-    public void setRotation(float angleX, float angleY, float angleZ) {
-        this.angleX = angleX;
-        this.angleY = angleY;
-        this.angleZ = angleZ;
+
+
+    public void setColor(float r, float g, float b, float a) { this.r = r; this.g = g; this.b = b; this.a = a;
+        registerEvent(EntityEvent.COLOR_CHANGE);
+
+    }
+    public void setColor(float r, float g, float b) { this.r = r; this.g = g; this.b = b;
+        registerEvent(EntityEvent.COLOR_CHANGE);
     }
 
-    public Vector3f getRotation(boolean radians) {
-        if (radians) return new Vector3f((float)Math.toRadians(angleX), (float)Math.toRadians(angleY), (float)Math.toRadians(angleZ));
-        else return new Vector3f(angleX, angleY, angleZ);
-    }
-
-    public void setColor(float r, float g, float b, float a) { this.r = r; this.g = g; this.b = b; this.a = a;}
-    public void setColor(float r, float g, float b) { this.r = r; this.g = g; this.b = b;}
     public Vector4f getColorRGBA() {return new Vector4f(r,g,b,a);} // why dont i treat other properties like vectors?
     public Vector3f getColorRGB() {return new Vector3f(r,g,b);}
+
     public void setTransparency(float a) {this.a = a;}
+
     public Matrix4f getModel() {return model;}
+
     public final float getX() { return x;}
     public final float getY() { return y;}
     public final float getZ() { return z;}
+
     public Vector3f getPosition() {return new Vector3f(x,y,z);}
-    public Vector3f getOriginalPosition() {
-        if (Float.isNaN(ogX)) {
-            return new Vector3f(0,0,0);
-        } else {return new Vector3f(ogX, ogY, ogZ);}
-    }
+
+    public Vector3f getSize() {return new Vector3f(w,h,d);}
+
+    public Vector3f getOriginalPosition() {return originalPosition;}
+
     public final float getWidth() { return w;}
     public final float getHeight() { return h;}
     public final float getDepth() { return d;}
-    public final float getAngleX() { return angleX;}
-    public final float getAngleY() { return angleY;}
-    public final float getAngleZ() { return angleZ;}
-    public void setVisibility(boolean v) {visible = v;}
+
+    public void setVisibility(boolean v) {
+        visible = v;
+        registerEvent(v?EntityEvent.MARKED_VISIBLE:EntityEvent.MARKED_INVISIBLE);
+
+    }
     public boolean isVisible() {return visible;}
+
     public final String getID() {return id;}
-    public final void setID(String id) {this.id = id;}
+    public final void setID(String id) {this.id = id; registerEvent(EntityEvent.ID_CHANGE);}
+
+    public int getTextureID() {return textureID;}
+    public int getTextureNum() {return textureNum;}
+
     public ShaderLoader.Shader getShader() { return shader; }
     public ShaderLoader.Shader setShader(String vertexPath, String fragmentPath) {
         if (!(Utils.fileExists(vertexPath, true) && Utils.fileExists(fragmentPath, true))) {
@@ -258,9 +421,14 @@ public abstract class Entity3D {
             return null;
         }
         shader = ShaderLoader.get(vertexPath, fragmentPath);
+        registerEvent(EntityEvent.SHADER_CHANGE);
+
         return shader;
     }
-    public void setShader(ShaderLoader.Shader shader) {this.shader = shader;}
+    public void setShader(ShaderLoader.Shader shader) {this.shader = shader;
+        registerEvent(EntityEvent.SHADER_CHANGE);
+    }
+
     public void attachLight(LightManager.PointLight light) {
         if (this.light == null) {
             engine.getLightManager().addPointLight(light);
@@ -269,10 +437,18 @@ public abstract class Entity3D {
         }
         this.light = light;
         this.light.position = new Vector3f(x,y,z);
+        registerEvent(EntityEvent.LIGHT_ATTACHED);
+
     }
-    public void detachLight() {engine.getLightManager().removePointLight(light.id); light = null;}
+
+    public void detachLight() {
+        engine.getLightManager().removePointLight(light.id); light = null;
+        registerEvent(EntityEvent.LIGHT_DETACHED);
+    }
     public LightManager.PointLight getAttachedLight() {return light;}
+
     public void setModel(Matrix4f model) {this.model = model;}
+
     public Vector3f getLocalMin() {return localMin;}
     public Vector3f getLocalMax() {return localMax;}
 
@@ -298,6 +474,14 @@ public abstract class Entity3D {
     }
 
     public OBB getOBB() {
+        if (cachedOBB == null || !model.equals(lastOBBModel)) {
+            cachedOBB = computeOBB();
+            lastOBBModel = new Matrix4f(model);
+        }
+        return cachedOBB;
+    }
+
+    private OBB computeOBB() {
         Vector3f axisX = new Vector3f(model.m00(), model.m01(), model.m02());
         Vector3f axisY = new Vector3f(model.m10(), model.m11(), model.m12());
         Vector3f axisZ = new Vector3f(model.m20(), model.m21(), model.m22());
@@ -322,9 +506,46 @@ public abstract class Entity3D {
                 halfExtents, axisX, axisY, axisZ, this.getID()
         );
     }
-    public void setDebug(int stage) {
-        if (stage < 0 || stage > 4) return;
-        debugStage = stage;
+
+    public void outline(boolean v) {this.outlined = v;}
+    public boolean isOutlined() {return this.outlined;}
+
+
+    public boolean isDebugged(int flag) {return debugFlags.contains(flag);}
+    public boolean hasDebugFlags() {return !debugFlags.isEmpty();}
+    public void addDebugFlag(int flag) {
+        registerEvent(EntityEvent.DEBUGGED);
+        if (debugFlags.contains(flag)) return;
+        debugFlags.add(flag);}
+    public void removeDebugFlag(int flag) {debugFlags.remove((Integer) flag);}
+    public void clearDebugFlags() {debugFlags.clear();}
+    public List<Integer> getDebugFlags() {return List.copyOf(debugFlags);}
+
+    public void updateTransformer() {if (transformer != null) transformer.update();}
+    public void renderTransformer() {if (transformer != null) transformer.render();}
+    public void translate(float dx, float dy, float dz) { // a little faster
+        setPosition(x + dx, y + dy, z + dz);
     }
-    public int getDebugStage() {return debugStage;}
+    public boolean isDragged() {
+        if (transformer != null) return transformer.isDragging();
+        return false;
+    }
+
+    public boolean isTransformerHovered() {
+        if (transformer == null) return false;
+        for (WorldEntity tp : transformer.getTransformerPointGroup().getEntities()) {
+            if (engine.getCamera().isHovered(tp)) return true;
+        }
+        return false;
+    }
+
+    public void clearTexture() {
+        textureID = -1; ntextureID = -1;
+        registerEvent(EntityEvent.TEXTURE_CHANGE);
+    }
+
+    protected void registerEvent(EntityEvent ev) {
+        if (!reportEvents) return;
+        if (engine.getWorld().isSceneRunning()) engine.getWorld().getCurrentScene().registerEntityEdit(this, ev);
+    }
 }

@@ -1,15 +1,15 @@
 package org.sharkk2.shrkengine.engine.entities;
 
 import static org.lwjgl.glfw.GLFW.*;
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL43.*;
 
 import org.sharkk2.shrkengine.engine.Engine;
 import org.sharkk2.shrkengine.engine.Input;
 import org.sharkk2.shrkengine.engine.ShaderLoader;
-import org.sharkk2.shrkengine.engine.classes.Entity2D;
+import org.sharkk2.shrkengine.engine.classes.SpriteEntity;
 import org.sharkk2.shrkengine.engine.helpers.Utils;
 
-public class Circle extends Entity2D {
+public class Circle extends SpriteEntity {
     private final int vao;
     private final ShaderLoader.Shader shader;
     private int vboUV = 0;
@@ -96,7 +96,7 @@ public class Circle extends Entity2D {
             shader.setInt("texSampler", 0);
         }
 
-        engine.onEntity2DRender(this);
+        engine.onSpriteEntityRender(this);
         glDrawArrays(GL_TRIANGLE_FAN, 0, segments + 2);
         return true;
     }
@@ -117,30 +117,6 @@ public class Circle extends Entity2D {
         glEnableVertexAttribArray(1);
     }
 
-    @Override
-    public void update(Runnable action) {
-        if (action != null) {action.run();}
-        else {
-            if (shouldBounce) makeItBounce();
-        }
-    }
-
-    @Override
-    public void handleInput(Runnable action) {
-        if (action != null) { action.run(); }
-        else {
-            if (Input.isKeyDown(GLFW_KEY_W)) y -= speed * engine.getDeltaTime();
-            if (Input.isKeyDown(GLFW_KEY_S)) y += speed * engine.getDeltaTime();
-            if (Input.isKeyDown(GLFW_KEY_D)) x += speed * engine.getDeltaTime();
-            if (Input.isKeyDown(GLFW_KEY_A)) x -= speed * engine.getDeltaTime();
-
-            float halfR = radius;
-            if (x - halfR < 0f) x = halfR;
-            if (x + halfR > engine.windowWidth) x = engine.windowWidth - halfR;
-            if (y - halfR < 0f) y = halfR;
-            if (y + halfR > engine.windowHeight) y = engine.windowHeight - halfR;
-        }
-    }
 
     @Override
     public void onDestroy() {}

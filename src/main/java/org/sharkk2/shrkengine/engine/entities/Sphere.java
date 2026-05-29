@@ -6,30 +6,32 @@ import org.sharkk2.shrkengine.engine.Camera;
 import org.sharkk2.shrkengine.engine.Engine;
 import org.sharkk2.shrkengine.engine.LightManager;
 import org.sharkk2.shrkengine.engine.ShaderLoader;
-import org.sharkk2.shrkengine.engine.classes.Entity3D;
+import org.sharkk2.shrkengine.engine.classes.WorldEntity;
 import org.sharkk2.shrkengine.engine.classes.Scene;
 
 import static org.lwjgl.glfw.GLFW.glfwGetTime;
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL43.*;
 
 // todo: fix lighting for spheres and instance them
 
-public class Sphere extends Entity3D {
+public class Sphere extends WorldEntity {
     private static int vao;
     private static int vboVertices;
     private static int vboUV;
     private static int vboNormals;
     private static boolean initialized = false;
 
-    private int textureID = -1;
-    private int textureNum = -1;
     private final Camera camera;
-    private float textureScale = -1f;
-    private int ntextureID = -1;
+    private final LightManager lightManager;
 
-    private static final int STACKS = 16;
-    private static final int SECTORS = 32;
-    private static final int VERTEX_COUNT = STACKS * SECTORS * 6;
+    private float textureScale = -1f;
+    private final Vector4f matPropsBuffer = new Vector4f();
+    private final Matrix4f projMatrix;
+    private final Matrix4f viewMatrix;
+
+    private static final int STACKS = 24;
+    private static final int SECTORS = 48;
+    public static final int VERTEX_COUNT = STACKS * SECTORS * 6;
 
     public static final float[] vertices;
     public static final float[] normals;
@@ -121,7 +123,11 @@ public class Sphere extends Entity3D {
 
     public Sphere(Engine engine) {
         super(engine);
+        entityType = EntityType.SPHERE;
         camera = engine.getCamera();
+        lightManager = engine.getLightManager();
+        projMatrix = camera.getProjectionMatrix();
+        viewMatrix = camera.getViewMatrix();
         if (!initialized) {
             vao = glGenVertexArrays();
             glBindVertexArray(vao);
@@ -147,46 +153,41 @@ public class Sphere extends Entity3D {
         shader = ShaderLoader.get("shaders/entities/entity.vert", "shaders/entities/entity.frag");
         model = new Matrix4f()
                 .translate(x, y, z)
-                .rotateXYZ((float)Math.toRadians(angleX),
-                        (float)Math.toRadians(angleY),
-                        (float)Math.toRadians(angleZ))
+                .rotate(rotation)
                 .scale(w, h, d);
         computeBounds(vertices);
     }
 
     @Override
     public boolean doRender() {
-        // any further optimizations are prolly not worth it
-
         if (!camera.inFrustum(this)) {return false;}
         shader.use();
         glBindVertexArray(vao);
 
-        Camera camera = engine.getCamera();
-        Matrix4f projection = camera.getProjectionMatrix();
-        Matrix4f view = camera.getViewMatrix();
+        camera.getProjectionMatrix(projMatrix);
+        camera.getViewMatrix(viewMatrix);
 
         if (!alive) return false;
         if (!visible) return false;
 
         shader.setMat4("model", model);
-        shader.setMat4("projection", projection);
-        shader.setMat4("view", view);
+        shader.setMat4("projection", projMatrix);
+        shader.setMat4("view", viewMatrix);
         shader.setVec4("color", getColorRGBA());
         shader.setInt("useInstancing", 0);
         shader.setInt("atlasSize", engine.getTextureLoader().getAtlasSize());
         shader.setInt("textureIndex", textureNum);
         shader.setFloat("utime", (float)glfwGetTime());
         shader.setInt("useColorMask", 1);
-        shader.setInt("numPointLights", engine.getLightManager().getPointLights().size());
         shader.setVec3("cameraPos", camera.getPosition());
         shader.setVec3("material.ambient", material.ambient);
         shader.setVec3("material.diffuse", material.diffuse);
         shader.setVec3("material.specular", material.specular);
         shader.setVec3("material.emissive", material.emissive);
-        shader.setVec4("material.matProps", new Vector4f(material.shininess, material.applyLight?1:0, material.rainbowEffect?1:0, material.emissiveStrength));
+        matPropsBuffer.set(material.shininess, material.applyLight?1:0, material.rainbowEffect?1:0, material.emissiveStrength);
+        shader.setVec4("material.matProps", matPropsBuffer);
 
-        Scene currentScene = engine.getWorld().getCurrentScene();;
+        Scene currentScene = engine.getWorld().getCurrentScene();
         shader.setVec3("dirLight.direction", currentScene.globalSceneLight.direction);
         shader.setVec3("dirLight.color", currentScene.globalSceneLight.color);
         shader.setVec3("dirLight.ambient", currentScene.globalSceneLight.ambient);
@@ -206,14 +207,7 @@ public class Sphere extends Entity3D {
         shader.setFloat("textureScale", textureScale);
         shader.setInt("useEmissiveMap", 0);
 
-
-        for (int i = 0; i < engine.getLightManager().getPointLights().size(); i++) {
-            LightManager.PointLight light = engine.getLightManager().getPointLights().get(i);
-            shader.setVec3("pointLights[" + i + "].position", light.position);
-            shader.setVec3("pointLights[" + i + "].color", light.color);
-            shader.setFloat("pointLights[" + i + "].range", light.lightRange);
-            shader.setFloat("pointLights[" + i + "].intensity", light.intensity);
-        }
+        engine.getRenderer().uploadLightData(shader);
 
         boolean hasTexture = textureID != -1;
         shader.setInt("useTexture", hasTexture? 1 : 0);
@@ -226,9 +220,9 @@ public class Sphere extends Entity3D {
                 shader.setInt("atlasSize", 1);
             }
         }
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, currentScene.globalSceneLight.shadowMap.depthTexture);
-        shader.setInt("shadowMap", 1);
+        glActiveTexture(GL_TEXTURE20);
+        glBindTexture(GL_TEXTURE_2D, lightManager.shadowMap.depthTexture);
+        shader.setInt("shadowMap", 20);
         shader.setMat4("lightSpaceMatrix", currentScene.globalSceneLight.getLightSpace(engine));
 
         boolean hasNormal = ntextureID != -1;
@@ -239,21 +233,12 @@ public class Sphere extends Entity3D {
             shader.setInt("useNormalMap", 1);
         }
 
-        engine.onEntity3DRender(this);
+        engine.onWorldEntityRender(this);
         glDrawArrays(GL_TRIANGLES, 0, VERTEX_COUNT);
         return true;
     }
 
 
-    @Override
-    public void handleInput(Runnable action) {
-        if (action != null) action.run();
-    }
-
-    @Override
-    public void update(Runnable action) {
-        if (action != null) action.run();
-    }
 
     @Override
     public void applyTexture(int texNum) {
@@ -262,13 +247,7 @@ public class Sphere extends Entity3D {
         textureNum = texNum;
     }
 
-    public void applyTexture(String texPath, int type) {
-        if (engine.getTextureLoader() == null) return;
-        switch (type) {
-            case 0: textureID = engine.getTextureLoader().loadTexture(texPath); break;
-            case 1: ntextureID = engine.getTextureLoader().loadTexture(texPath);
-        }
-    }
+
 
     @Override
     protected void onDestroy() {}
@@ -306,7 +285,7 @@ public class Sphere extends Entity3D {
         clone.setColor(getColorRGBA().x, getColorRGBA().y, getColorRGBA().z, getColorRGBA().w);
         clone.setID(getID() + "_clone");
         clone.setRotation(getAngleX(), getAngleY(), getAngleZ());
-        clone.setModel(getModel());
+        clone.setModel(new Matrix4f(getModel()));
         if (textureID != -1) clone.applyTexture(getTextureNum());
         clone.setShader(getShader());
         clone.setVisibility(isVisible());

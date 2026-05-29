@@ -82,4 +82,62 @@ public class Utils {
         buf.put(pcm).flip();
         return new WavData(buf, format, channels, fmt);
     }
+
+    public static float getClosestAxisT(Vector3f axisOrigin, Vector3f axisDir, Vector3f rayOrigin, Vector3f rayDir) {
+        /* ts finds the point on the axis thats the closest to the mouse axis "turned into a 3D ray as you see above"
+        gap = (rayOrigin + rayDir * s) - (axisOrigin + axisDir * t)
+        from this we need to derive a quick equation to find t *or s optionally* to use in this method
+
+        at the closest point, the gap vector is perpendicular to both lines "the axis and mouse rays" *you can see this with your 2 pointers
+        this happens when the dot product is zero
+        from the equation above, we need to find s and t when the gap is perpendicular to both lines
+        so to do that lets first shorten the equation a little, by setting rayOrigin - axisOrigin as 'w'
+        gap =  rayOrigin + rayDir * s - axisOrigin - axisDir * t
+        gap = w + rayDir*s - axisDir*t "nicer"
+        now we can get 2 equations as follows:
+        gap dotted with rayDir and gap dotted with axisDir
+        first: w + rayDir*s - axisDir* t ' rayDir "dot distributes like how multiplication does" "pretend ' is a dot symbol"
+        w ' rayDir + (rayDir*s) ' rayDir - (axisDir*t) ' rayDir = 0
+        get t and s out: w ' rayDir + s(rayDir ' rayDir) - t(axisDir ' rayDir) "first equation!!"
+        second equation is the exact same but dotted with axisDir instead
+        w ' axisDir + s(rayDir ' axisDir) - t(axisDir ' axisDir) "second equation"
+
+        with this we just get all dots we need in code and solve the equation, thats literally it lol
+
+        it might be worth it to also explain how we solve it "at the end i explained all of this so why not":
+        below in the code i defined the dot products so lets just use them right away for cleaner equations:
+          d + s*a - t*b = 0 (equation 1)
+          e + s*b - t*c = 0 (equation 2)
+        isolate s:
+          s*a = t*b - d
+          s = (t*b-d) / a
+        then sub s in the second equation:
+         e + ((t*b-d) / a)*b - t*c = 0 "looks ugly cuz there is division so just get rid of it and multiply by a"
+         e(a) + (t*b-d)*b - a(t*c) = 0
+         e(a) + t*b^2 - d(b) - t*c*a = 0
+        group them t and isolate the entire t thing
+         e(a) + t*(b^2 - c*a) - d(b) = 0
+         t*(b^2 - c*a) = d(b) - e(a)
+        and FINALLY take js the t out
+         t =  (d*b - e*a)  / (b*b - c*a)  tadaa
+        */
+
+
+        Vector3f w = new Vector3f(rayOrigin).sub(axisOrigin);
+        float a = rayDir.dot(rayDir);  // rayDir ' rayDir
+        float b = rayDir.dot(axisDir); // rayDir ' axisDir
+        float c = axisDir.dot(axisDir); // axisDir ' axisDir
+        float d = rayDir.dot(w); // rayDir ' w
+        float e = axisDir.dot(w);  // axisDir ' w
+        float denom = b * b - a * c; // 0 if parallel
+        if (Math.abs(denom) < 1e-6f) return 0;
+
+        return (b * d - a * e) / denom; // t along the axis
+    }
+
+    public static float ms(long since) {
+        return (System.nanoTime() - since) / 1_000_000f;
+    }
+
+
 }

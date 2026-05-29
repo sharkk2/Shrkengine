@@ -1,5 +1,5 @@
 package org.sharkk2.shrkengine.engine;
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL43.*;
 
 public class Bloom {
     private final Engine engine;
@@ -7,12 +7,13 @@ public class Bloom {
     private final int[] pingPongTextures = new int[2];
     private int brightFBO;
     private int brightTexture;
+    private int bloomTexture;
     private final ShaderLoader.Shader brightnessShader;
     private final ShaderLoader.Shader blurShader;
     public Bloom(Engine engine) {
         this.engine = engine;
-        brightnessShader = ShaderLoader.get("shaders/bloom/brightness.vert", "shaders/bloom/brightness.frag");
-        blurShader = ShaderLoader.get("shaders/bloom/brightness.vert", "shaders/bloom/blur.frag");
+        brightnessShader = ShaderLoader.get("shaders/post/bloom/brightness.vert", "shaders/post/bloom/brightness.frag");
+        blurShader = ShaderLoader.get("shaders/post/bloom/brightness.vert", "shaders/post/bloom/blur.frag");
         init();
     }
 
@@ -62,20 +63,25 @@ public class Bloom {
         boolean horizontal = true;
         blurShader.use();
         glBindTexture(GL_TEXTURE_2D, brightTexture);
+        int lastTexture = brightTexture;
+
         for (int i = 0; i < blurPasses * 2; i++) {
-            glBindFramebuffer(GL_FRAMEBUFFER, pingPongFBOs[horizontal ? 1 : 0]);
+            int targetFBO = pingPongFBOs[horizontal ? 1 : 0];
+            int sourceTex = (i == 0) ? brightTexture : pingPongTextures[horizontal ? 0 : 1];
+            glBindFramebuffer(GL_FRAMEBUFFER, targetFBO);
             glClear(GL_COLOR_BUFFER_BIT);
             blurShader.setInt("image", 0);
             blurShader.setInt("horizontal", horizontal ? 1 : 0);
             glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, i == 0 ? brightTexture : pingPongTextures[horizontal ? 0 : 1]);
+            glBindTexture(GL_TEXTURE_2D, sourceTex);
             glDrawArrays(GL_TRIANGLES, 0, 6);
+            lastTexture = pingPongTextures[horizontal ? 1 : 0];
             horizontal = !horizontal;
         }
-
+        bloomTexture = lastTexture;
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glBindVertexArray(0);
-        return pingPongTextures[0];
+        return bloomTexture;
     }
 
     public void resize() {
@@ -111,5 +117,9 @@ public class Bloom {
             glDeleteFramebuffers(pingPongFBOs[i]);
             glDeleteTextures(pingPongTextures[i]);
         }
+    }
+
+    public int getBrightnessTexture(boolean blurred) {
+        return blurred ? bloomTexture : brightTexture;
     }
 }

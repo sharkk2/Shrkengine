@@ -7,7 +7,7 @@ import org.sharkk2.shrkengine.engine.Camera;
 import org.sharkk2.shrkengine.engine.Engine;
 import org.sharkk2.shrkengine.engine.LightManager;
 import org.sharkk2.shrkengine.engine.ShaderLoader;
-import org.sharkk2.shrkengine.engine.classes.Entity3D;
+import org.sharkk2.shrkengine.engine.classes.WorldEntity;
 import org.sharkk2.shrkengine.engine.classes.Scene;
 
 import java.nio.FloatBuffer;
@@ -18,9 +18,9 @@ import java.util.Random;
 import java.util.function.Consumer;
 
 import static org.lwjgl.glfw.GLFW.glfwGetTime;
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL43.*;
 
-public class ParticleEmitter extends Entity3D {
+public class ParticleEmitter extends WorldEntity {
 
     private int textureNum = -1;
     public int maxParticleCount = 100;
@@ -31,56 +31,30 @@ public class ParticleEmitter extends Entity3D {
     private final List<Particle> toRemoveParticles = new ArrayList<>();
     private int spawnQueue = 0;
     private boolean blendedRendering = false;
-
+    private boolean lightShafts = true;
     private float[] matrixBuffer = new float[maxParticleCount * 16];
     private float[] colorBuffer = new float[maxParticleCount * 4];
     private int[] texBuffer = new int[maxParticleCount];
     private FloatBuffer matNIO = org.lwjgl.BufferUtils.createFloatBuffer(maxParticleCount * 16);
     private FloatBuffer colorNIO = org.lwjgl.BufferUtils.createFloatBuffer(maxParticleCount * 4);
     private IntBuffer texNIO = org.lwjgl.BufferUtils.createIntBuffer(maxParticleCount);
-
+    private final Matrix4f particleModel = new Matrix4f();
     int[] randomTextures = {};
 
     public ParticleEmitter(Engine engine) {
         super(engine);
+        entityType = EntityType.PARTICLE_EMITTER;
         model = new Matrix4f().identity();
     }
 
-    @Override
-    public void setPosition(float x, float y, float z) {
-        super.setPosition(x, y, z);
-        rebuildModel();
-    }
-
-    @Override
-    public void setSize(float w, float h, float d) {
-        super.setSize(w, h, d);
-        rebuildModel();
-    }
-
-    @Override
-    public void setRotation(float ax, float ay, float az) {
-        super.setRotation(ax, ay, az);
-        rebuildModel();
-    }
-
-    private void rebuildModel() {
-        model = new Matrix4f()
-                .translate(x, y, z)
-                .rotateXYZ((float) Math.toRadians(angleX),
-                        (float) Math.toRadians(angleY),
-                        (float) Math.toRadians(angleZ))
-                .scale(w, h, d);
-    }
 
     private void uploadParticles(int count) {
         for (int i = 0; i < count; i++) {
             Particle p = particles.get(i);
-            p.setModel(new Matrix4f()
+            p.setModel(particleModel.identity()
                     .translate(p.getX(), p.getY(), p.getZ())
-                    .rotateXYZ(p.getRotation(true))
-                    .scale(p.getWidth(), p.getHeight(), p.getDepth())
-            );
+                    .rotateXYZ(p.getAngleX(), p.getAngleY(), p.getAngleZ())
+                    .scale(p.getWidth(), p.getHeight(), p.getDepth()));
             p.getModel().get(matrixBuffer, i * 16);
             Vector4f c = p.getColorRGBA();
             colorBuffer[i * 4] = c.x;
@@ -109,6 +83,14 @@ public class ParticleEmitter extends Entity3D {
         if (baseParticle == null) throw new RuntimeException("No base particle set for emitter " + getID());
         int count = Math.min(particles.size(), maxParticleCount);
         if (count == 0) return false;
+        if (!lightShafts) {
+            glEnable(GL_STENCIL_TEST);
+            glStencilFunc(GL_ALWAYS, 1, 0xFF);
+            glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+            glStencilMask(0xFF);
+        } else {
+            glStencilMask(0x00);
+        }
 
         ShaderLoader.Shader shader = baseParticle.getShader();
         shader.use();
@@ -164,14 +146,14 @@ public class ParticleEmitter extends Entity3D {
         uploadParticles(count);
         if (blendedRendering) {
             glEnable(GL_DEPTH_TEST);
-            glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE);
             glDepthMask(false);
             glDisable(GL_CULL_FACE);
-
             glDrawArraysInstanced(GL_TRIANGLES, 0, 6, count);
             glDepthMask(true);
-            glDisable(GL_BLEND);
+            glEnable(GL_CULL_FACE);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
         } else {
             if (!engine.getIO("wireframe")) {
                 glEnable(GL_CULL_FACE);
@@ -181,21 +163,22 @@ public class ParticleEmitter extends Entity3D {
             glDrawArraysInstanced(GL_TRIANGLES, 0, 6, count);
             glDisable(GL_CULL_FACE);
         }
+        glDisable(GL_STENCIL_TEST);
+        glStencilMask(0xFF);
         glBindVertexArray(0);
         return true;
     }
 
-    @Override
-    public void handleInput(Runnable action) {if (action != null) action.run();}
+
 
     @Override
-    public void update(Runnable action) {
-        if (action != null) action.run();
+    public void update() {
         for (int i = 0; i < particles.size(); i++) {
             Particle p = particles.get(i);
-            p.update(null);
+            p.update();
             if (animation != null) animation.accept(p);
         }
+
 
         if (!toRemoveParticles.isEmpty()) {
             particles.removeAll(toRemoveParticles);
@@ -204,10 +187,11 @@ public class ParticleEmitter extends Entity3D {
 
         for (int i = 0; i < spawnQueue; i++) {
             if (particles.size() < maxParticleCount) {
-                spawnParticle(getRandomSpawnLoc());
+                spawnParticle(null);
             }
         }
         spawnQueue = 0;
+        if (updateScript != null) updateScript.run();
     }
 
     @Override
@@ -224,11 +208,12 @@ public class ParticleEmitter extends Entity3D {
         baseParticle.applyTexture(texPath);
     }
 
-    public  Vector3f getRandomSpawnLoc() {
-        float spawnX = x + (rand.nextFloat() - 0.5f) * w;
-        float spawnY = y + (rand.nextFloat() - 0.5f) * h;
-        float spawnZ = z + (rand.nextFloat() - 0.5f) * d;
-        return new Vector3f(spawnX, spawnY, spawnZ);
+    public void randomizeSpawnLoc(Particle p) {
+        p.setPosition(
+                x + (rand.nextFloat() - 0.5f) * w,
+                y + (rand.nextFloat() - 0.5f) * h,
+                z + (rand.nextFloat() - 0.5f) * d
+        );
     }
 
     public Vector3f mapToWorld(Vector3f relative) {
@@ -239,8 +224,14 @@ public class ParticleEmitter extends Entity3D {
 
     private Particle spawnParticle(Vector3f spawnloc) {
         Particle p = baseParticle.clone();
+        p.reportEvents = false;
+        if (spawnloc == null) {
+            randomizeSpawnLoc(p);
+        } else {
+            p.setPosition(spawnloc.x, spawnloc.y, spawnloc.z);
+        }
         p.setID(getID() + "_particle_" + particles.size());
-        p.setPosition(spawnloc.x, spawnloc.y, spawnloc.z);
+        p.seed = p.getID().hashCode() * 0.0001f;
         p.birthTime = glfwGetTime() - (float)(Math.random() * p.lifetime);
         if (randomTextures.length != 0) {
             int tex = randomTextures[rand.nextInt(randomTextures.length)];
@@ -255,8 +246,8 @@ public class ParticleEmitter extends Entity3D {
     public void spawnAll() {
         if (baseParticle == null) throw new RuntimeException("No base particle set for emitter " + getID());
         int remaining = maxParticleCount - particles.size();
-        for (int i = 0; i < remaining; i++) spawnParticle(getRandomSpawnLoc());
-        System.out.println("Spawned " + particles.size() + " particles at (" + x + ", " + y + ", " + z + ")");
+        for (int i = 0; i < remaining; i++) spawnParticle(null);
+        System.out.println("[Particle system] Spawned " + particles.size() + " particles at (" + x + ", " + y + ", " + z + ")");
     }
 
     public void spawnAll(Vector3f relativePosition) {
@@ -307,5 +298,7 @@ public class ParticleEmitter extends Entity3D {
     public void enableBlend(boolean v) {this.blendedRendering = v;}
     public void setAnimation(Consumer<Particle> anim) {this.animation = anim;}
     public void setTextures(int[] textures) {this.randomTextures = textures;}
+    public boolean makesLightShafts() {return lightShafts;}
+    public void enableLightShafts(boolean v) {lightShafts =v;}
 
 }

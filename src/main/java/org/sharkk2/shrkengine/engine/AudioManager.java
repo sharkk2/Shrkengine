@@ -115,6 +115,19 @@ public class AudioManager {
         alDeleteSources(sourceID);
     }
 
+    public void pauseAudio(int sourceID) {
+        if (!activeSources.contains(sourceID)) return;
+        alSourcePause(sourceID);
+    }
+
+    public void resumeAudio(int sourceID) {
+        if (!activeSources.contains(sourceID)) return;
+        alSourcePlay(sourceID);
+    }
+
+    public void pauseAll() {for (int sourceId : activeSources) {alSourcePause(sourceId);}}
+    public void resumeAll() {for (int sourceId : activeSources) {alSourcePlay(sourceId);}}
+
    public void cleanup() {
        cleanupSources();
        audioRegistry.clear();

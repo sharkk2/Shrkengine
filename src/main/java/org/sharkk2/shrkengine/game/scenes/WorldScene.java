@@ -4,18 +4,15 @@ import org.joml.Vector3f;
 import static org.lwjgl.glfw.GLFW.*;
 
 import org.sharkk2.shrkengine.engine.*;
-import org.sharkk2.shrkengine.engine.classes.Entity2D;
-import org.sharkk2.shrkengine.engine.classes.Entity3D;
+import org.sharkk2.shrkengine.engine.classes.SpriteEntity;
+import org.sharkk2.shrkengine.engine.classes.WorldEntity;
 import org.sharkk2.shrkengine.engine.classes.Model;
 import org.sharkk2.shrkengine.engine.classes.Scene;
 import org.sharkk2.shrkengine.engine.entities.*;
-import org.sharkk2.shrkengine.engine.entities.particlesys.Particle;
-import org.sharkk2.shrkengine.engine.entities.particlesys.ParticleEmitter;
 import org.sharkk2.shrkengine.engine.ui.TextManager;
 
-import java.util.List;
+import javax.swing.text.html.parser.Entity;
 import java.util.Random;
-import java.util.Vector;
 
 
 public class WorldScene extends Scene {
@@ -30,51 +27,18 @@ public class WorldScene extends Scene {
     @Override
     public void tick() {
         if (Input.isGamepadConnected()) Input.setGamepadLight(sceneTime.getSkyColor(true));
-        if ((Input.isKeyPressed(GLFW_KEY_ENTER) || Input.isButtonPressed(GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER)) && camera.getLookingAt() != null && camera.getLookingAt().getID().equals("ps5_model")) {
-            engine.getWorld().setCurrentScene(new TestScene(engine, "testscene"));
+        if ((Input.isKeyPressed(GLFW_KEY_ENTER) || Input.isButtonPressed(GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER)) && camera.getLookingAt() != null && camera.getLookingAt().getID().equals("ps5_controller")) {
+            TextManager.TextGroup tg = engine.getTextManager().createTextGroup();
+            float tw = engine.getTextManager().getTextWidth("Loading..", 40);
+            float th = engine.getTextManager().getTextHeight("Loading..", 40);
+            tg.addText(new TextManager.Text("loading", engine.windowWidth / 2f - tw / 2f, engine.windowHeight / 2f - th / 2f, 40, 0.4f, 0.3f, 1, 1, "Loading.."));
+            engine.runNextFrame(() -> {
+                engine.getTextManager().removeGroup(tg.groupID);
+                engine.getWorld().setCurrentScene(new TestScene(engine, "testscene"));
+            }, false);
         }
+
         sceneTime.tick();
-        screenEntities.removeIf(e -> {
-            if (!e.isAlive()) {
-                screenEntityMap.remove(e.getID());
-                return true;
-            }
-            return false;
-        });
-
-        for (Entity3D entity : getWorldEntities()) {
-            entity.handleInput(null);
-            if (entity instanceof Model e && entity.getID().equals("ps5_model")) {
-                entity.update(() -> {
-                    float speed = 60f;
-                    float dt = engine.getDeltaTime();
-                    float angleX = e.getAngleX() + speed * dt;
-                    float angleY = e.getAngleY() + speed * dt;
-                    float angleZ = e.getAngleZ() + speed * dt;
-                    if (angleX >= 360f) angleX -= 360f;
-                    if (angleY >= 360f) angleY -= 360f;
-                    if (angleZ >= 360f) angleZ -= 360f;
-                    double bounce = 1 * Math.abs(Math.sin(Math.toRadians(angleY)));
-                    e.setRotation(e.getAngleX(), angleY, e.getAngleZ());
-                    e.setPosition(e.getX(), e.getOriginalPosition().y + (float)bounce, e.getZ());
-                    float time = (float) glfwGetTime();
-                    float r = 0.5f + 0.5f * (float)Math.sin(time);
-                    float g = 0.5f + 0.5f * (float)Math.sin(time + 2.0f);
-                    float b = 0.5f + 0.5f * (float)Math.sin(time + 4.0f);
-                    e.getChild("ledStrip").setColor(r,g,b);
-                    LightManager.PointLight al = e.getChild("ledStrip").getAttachedLight();
-                    al.color = new Vector3f(r,g,b);
-                    e.getChild("ledStrip").attachLight(al);
-                });
-            } else {
-                entity.update(null);
-            }
-        }
-        for (Entity2D entity : screenEntities) {
-            entity.handleInput(()->{});
-            entity.update(()->{});
-
-        }
         engine.getLightManager().setPointLight(flashlightid, new LightManager.PointLight(5, camera.getPosition(), new Vector3f(1,1,1), 10));
         for (LightManager.PointLight pointLight : engine.getLightManager().getPointLights()) {
             if (pointLight.visualized) pointLight.visualize(engine);
@@ -92,7 +56,7 @@ public class WorldScene extends Scene {
         camera.setPitch(-67);
         camera.setYaw(72);
         engine.getAudioManager().playAudio(new AudioManager.Audio("theme", new Vector3f(), new Vector3f(), new Vector3f(), true, true, 1, 2, 1));
-        int gridSize = 128;
+        int gridSize = 100;
         int spacing = 1;
         for (int i = -gridSize/2; i < gridSize / 2; i++) {
             for (int v = -gridSize/2; v < gridSize / 2; v++) {
@@ -143,25 +107,21 @@ public class WorldScene extends Scene {
         addWorldEntity(testCube3);
         Random rand = new Random();
         for (int i = 0; i < 5; i++) {
-            Model treeModel = engine.getModelLoader().loadModel("src/main/resources/models/stylized_tree/scene.gltf");
+            Model treeModel = engine.getModelLoader().getModel("tree");
             float x = 12 + (rand.nextFloat() - 0.5f) * 40;
             float z = 16 + (rand.nextFloat() - 0.5f) * 40;
-            treeModel.setID("tree_model");
             treeModel.setPosition(x, 0.5f, z);
             treeModel.setSize(10,10,10);
-            treeModel.setChildrenID("tree_mesh");
             addWorldEntity(treeModel);
             for (Mesh mesh : treeModel.getChildren()) {
                 mesh.material.setAmbient(0.45f,0.45f,0.45f);
             }
         }
-        Model sharkModel = engine.getModelLoader().loadModel("src/main/resources/models/mechanical_shark/scene.gltf");
-        sharkModel.setID("shark_model");
+        Model sharkModel = engine.getModelLoader().getModel("shark");
         sharkModel.setRotation(sharkModel.getAngleX(), 30, sharkModel.getAngleZ());
         sharkModel.setPosition(10, 3, 10);
         sharkModel.setSize(1,1,1);
         sharkModel.setColor(0.216f,0.216f,0.216f);
-        sharkModel.setChildrenID("shark_mesh");
         addWorldEntity(sharkModel);
         for (Mesh mesh : sharkModel.getChildren()) {
             mesh.material.setAmbient(0.25f,0.25f,0.25f);
@@ -170,30 +130,32 @@ public class WorldScene extends Scene {
         Vector3f vel = new Vector3f();
         engine.getAudioManager().playAudio(new AudioManager.Audio("niggaAudio", sharkModel.getPosition(), dir, vel, false, true, 1, 10, 0.2f));
 
-        Model backpackModel = engine.getModelLoader().loadModel("src/main/resources/models/backpack/backpack.obj");
-        backpackModel.setID("backpack");
+
+ /*       Model playerModel = engine.getModelLoader().loadModel("src/main/resources/models/player/player.obj");
+        playerModel.setID("player");
+        playerModel.setPosition(0,2,0);
+        //playerModel.setVisibility(false);
+        addWorldEntity(playerModel);
+        camera.setCharacter(playerModel); */
+
+        Model backpackModel = engine.getModelLoader().getModel("backpack");
         backpackModel.setPosition(7, 4, 15);
         backpackModel.setColor(1,0,0);
         backpackModel.setRotation(backpackModel.getAngleX(), 30, backpackModel.getAngleZ());
         backpackModel.setSize(0.5f,0.5f,0.5f);
-        backpackModel.setChildrenID("backpack_mesh");
         addWorldEntity(backpackModel);
 
-        Model backpackModel2 = engine.getModelLoader().loadModel("src/main/resources/models/backpack/backpack.obj");
-        backpackModel2.setID("backpack2");
+        Model backpackModel2 = engine.getModelLoader().getModel("backpack");
         backpackModel2.setPosition(3,6,17);
         backpackModel2.setColor(1,0,0);
         backpackModel2.setRotation(backpackModel2.getAngleX(), 30, backpackModel2.getAngleZ());
         backpackModel2.setSize(0.5f,0.5f,0.5f);
-        backpackModel2.setChildrenID("backpack_mesh2");
         addWorldEntity(backpackModel2);
 
-        Model psModel = engine.getModelLoader().loadModel("src/main/resources/models/ps5/scene.gltf");
+        Model psModel = engine.getModelLoader().getModel("ps5_controller");
         psModel.setPosition(14, 3, 13);
         psModel.setSize(0.5f,0.5f,0.5f);
-        psModel.setID("ps5_model");
         psModel.setRotation(psModel.getAngleX(), 30, psModel.getAngleZ());
-        psModel.setChildrenID("ps5");
         Mesh ledStrip = psModel.getChildren().get(21);
         ledStrip.material.setRainbowEffect(true);
         ledStrip.material.setEmissive(7,7,7);
@@ -201,7 +163,26 @@ public class WorldScene extends Scene {
         ledStrip.material.setEmissiveStrength(3);
         ledStrip.attachLight(new LightManager.PointLight(0.5f, ledStrip.getPosition(), ledStrip.getColorRGB(), 2));
         addWorldEntity(psModel);
-        for (Entity3D e : getWorldEntities()) {
+        float[] yAngle = {30f};
+        psModel.script(() -> {
+            float speed = 60f;
+            float dt = engine.getDeltaTime();
+            yAngle[0] = (yAngle[0] + speed * dt) % 360f;
+
+            double bounce = Math.abs(Math.sin(Math.toRadians(yAngle[0])));
+            psModel.rotate(0, speed * dt, 0);
+            psModel.setPosition(psModel.getX(), psModel.getOriginalPosition().y + (float) bounce, psModel.getZ());
+
+            float time = (float) glfwGetTime();
+            float r = 0.5f + 0.5f * (float) Math.sin(time);
+            float g = 0.5f + 0.5f * (float) Math.sin(time + 2.0f);
+            float b = 0.5f + 0.5f * (float) Math.sin(time + 4.0f);
+            psModel.getChild("ledStrip").setColor(r, g, b);
+            LightManager.PointLight al = psModel.getChild("ledStrip").getAttachedLight();
+            al.color = new Vector3f(r, g, b);
+            psModel.getChild("ledStrip").attachLight(al);
+        });
+        for (WorldEntity e : getWorldEntities()) {
             if (e instanceof Cube c) {
                 c.checkNeighbours();
             }
@@ -216,10 +197,18 @@ public class WorldScene extends Scene {
 
     @Override
     public void onScreenResize(int oldWidth, int oldHeight) {
-        Entity2D crossair = getScreenEntity("crossair");
+        SpriteEntity crossair = getScreenEntity("crossair");
         if (crossair != null) crossair.setPosition(engine.windowWidth / 2f, engine.windowHeight / 2f);
     }
 
     @Override
     public void onDestroy() {}
+
+
+    @Override
+    public void onEntityAdded(WorldEntity entity) {}
+
+    @Override
+    public void onEntityRemoved(String id) {}
+
 }

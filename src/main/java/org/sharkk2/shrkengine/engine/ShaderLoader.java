@@ -6,7 +6,7 @@ import org.lwjgl.system.MemoryStack;
 import org.sharkk2.shrkengine.engine.helpers.Utils;
 import java.util.HashMap;
 import java.util.Map;
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL43.*;
 
 public class ShaderLoader {
     private static final Map<String, Shader> shaders = new HashMap<>();
@@ -27,7 +27,7 @@ public class ShaderLoader {
 
         glDeleteShader(vertex);
         glDeleteShader(fragment);
-        return new Shader(program);
+        return new Shader(program, vertexPath, fragmentPath);
     }
 
     private static int compile(int type, String src) {
@@ -49,8 +49,11 @@ public class ShaderLoader {
 
     public static class Shader { // TODO: DO UBO
         private final int id;
+        private String vertPath;
+        private String fragPath;
         private final Map<String, Integer> locationCache = new HashMap<>();
         private Shader(int id) { this.id = id; }
+        private Shader(int id, String vertPath, String fragPath) { this.id = id; this.vertPath = vertPath; this.fragPath = fragPath;}
 
         public void use() {glUseProgram(id); }
         public int getId() {return id; }
@@ -72,9 +75,11 @@ public class ShaderLoader {
                 glUniformMatrix4fv(loc(name), false, m.get(stack.mallocFloat(16)));
             }
         }
+        public void setVec2(String name, Vector2f v) {glUniform2f(loc(name), v.x, v.y);}
         public void setVec3(String name, Vector3f v) {glUniform3f(loc(name), v.x, v.y, v.z);}
         public void setVec4(String name, Vector4f v) {glUniform4f(loc(name), v.x, v.y, v.z, v.w);}
-
+        public String getVertPath() {return vertPath;}
+        public String getFragPath() {return fragPath;}
         public void destroy() {glDeleteProgram(id); locationCache.clear();}
     }
 }

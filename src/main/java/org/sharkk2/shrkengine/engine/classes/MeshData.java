@@ -1,5 +1,5 @@
 package org.sharkk2.shrkengine.engine.classes;
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL43.*;
 
 public class MeshData {
     public final int vao;

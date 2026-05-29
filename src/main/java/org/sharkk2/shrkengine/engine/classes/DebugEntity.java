@@ -2,18 +2,17 @@ package org.sharkk2.shrkengine.engine.classes;
 
 import org.sharkk2.shrkengine.engine.Engine;
 import org.sharkk2.shrkengine.engine.ShaderLoader;
-import org.sharkk2.shrkengine.engine.classes.Entity3D;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
 public abstract class DebugEntity {
     protected final Engine engine;
-    protected final Entity3D target;
+    protected final WorldEntity target;
     private static final AtomicInteger ID_COUNTER = new AtomicInteger(0);
     protected String id;
     protected ShaderLoader.Shader shader;
 
-    protected DebugEntity(Engine engine, Entity3D target) {
+    protected DebugEntity(Engine engine, WorldEntity target) {
         this.engine = engine;
         this.target = target;
         this.id = getClass().getSimpleName() + "_" + ID_COUNTER.getAndIncrement();

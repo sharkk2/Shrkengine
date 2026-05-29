@@ -2,7 +2,7 @@ package org.sharkk2.shrkengine.engine.classes;
 
 import org.sharkk2.shrkengine.engine.Engine;
 
-public abstract class Entity2D {
+public abstract class SpriteEntity {
     protected final Engine engine;
     protected String id = "";
     protected float x = 0;
@@ -11,13 +11,15 @@ public abstract class Entity2D {
     protected float h = 1;
     protected float angle;
     protected boolean alive = true;
+    protected Runnable updateScript = null;
 
-    protected Entity2D(Engine engine) {
+    protected SpriteEntity(Engine engine) {
         this.engine = engine;
     }
 
-    public abstract void handleInput(Runnable action);
-    public abstract void update(Runnable action);
+    public void update() {
+      if (updateScript != null) updateScript.run();
+    }
     protected abstract boolean doRender();
     public abstract void applyTexture(int texNum);
     protected abstract void onDestroy();
@@ -52,4 +54,5 @@ public abstract class Entity2D {
     public final void setAngle(float angle) {this.angle = angle;}
     public final String getID() {return id;}
     public final void setID(String id) {this.id = id;}
+    public void script(Runnable script) {this.updateScript = script;}
 }

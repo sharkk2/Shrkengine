@@ -1,18 +1,14 @@
 package org.sharkk2.shrkengine.engine.entities.particlesys;
 
 import org.joml.Matrix4f;
-import org.joml.Vector3f;
-import org.sharkk2.shrkengine.engine.Camera;
 import org.sharkk2.shrkengine.engine.Engine;
 import org.sharkk2.shrkengine.engine.ShaderLoader;
-import org.sharkk2.shrkengine.engine.classes.Entity3D;
-
-import java.util.function.Consumer;
+import org.sharkk2.shrkengine.engine.classes.WorldEntity;
 
 import static org.lwjgl.glfw.GLFW.glfwGetTime;
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL43.*;
 
-public class Particle extends Entity3D {
+public class Particle extends WorldEntity {
 
     // All static — one shared VAO and VBOs for every particle instance
     static int vao;
@@ -27,6 +23,7 @@ public class Particle extends Entity3D {
     public final double lifetime;
     private final ParticleEmitter parent;
     public double birthTime;
+    public float seed;
 
     public static final float[] vertices = {
             -0.5f, -0.5f,  0.5f,
@@ -96,17 +93,16 @@ public class Particle extends Entity3D {
     }
 
     @Override
-    public void update(Runnable action) {
+    public void update() {
         if (glfwGetTime() - birthTime >= lifetime) {
             reset();
             return;
         }
-
-        if (action != null) action.run();
+        if (updateScript != null) updateScript.run();
     }
 
-    @Override
-    public void handleInput(Runnable action) {if (action != null) action.run();}
+
+
 
     @Override
     public void applyTexture(int texNum) {
@@ -133,7 +129,7 @@ public class Particle extends Entity3D {
     public Particle clone() {
         Particle copy = new Particle(this.engine, this.lifetime, this.parent);
         copy.setPosition(this.x, this.y, this.z);
-        copy.setRotation(this.angleX, this.angleY, this.angleZ);
+        copy.setRotation(rotation);
         copy.setSize(this.w, this.h, this.d);
         copy.setColor(this.r, this.g, this.b, this.a);
         copy.textureID = this.textureID;
@@ -151,8 +147,7 @@ public class Particle extends Entity3D {
     }
 
     public void reset() {
-        Vector3f spawn = parent.getRandomSpawnLoc();
-        setPosition(spawn.x, spawn.y, spawn.z);
+        parent.randomizeSpawnLoc(this);
         birthTime = glfwGetTime();
     }
 

@@ -7,18 +7,20 @@ import org.lwjgl.system.MemoryStack;
 import org.sharkk2.shrkengine.engine.classes.MeshData;
 import org.sharkk2.shrkengine.engine.classes.Model;
 import org.sharkk2.shrkengine.engine.entities.Mesh;
+import org.sharkk2.shrkengine.engine.helpers.ThreadManager;
 
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.lwjgl.assimp.Assimp.*;
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL43.*;
 import static org.lwjgl.stb.STBImage.*;
 
 public class ModelLoader {
-
+   // fixme this whole thing is sketchy as hell, it basically relies on if "enough time has passed" before something calls it
     private record CachedMesh(MeshData data, List<Mesh.MeshTexture> textures, Matrix4f nodeTransform, Vector3f ambient, Vector3f diffuse, Vector3f specular, Vector3f emissive, float shininess, float emissiveFactor) {}
 
     private final Engine engine;
@@ -26,18 +28,17 @@ public class ModelLoader {
     private final Map<String, Mesh.MeshTexture> textureCache = new HashMap<>();
     private final Map<String, List<CachedMesh>> modelCache = new HashMap<>();
     private boolean flipUVs;
-
+    private String currentJob = "";
     public ModelLoader(Engine engine) {
         this.engine = engine;
     }
 
-    public Model loadModel(String path) {
-        Model model = new Model(engine);
-        if (modelCache.containsKey(path)) {
-            for (Mesh m : instantiate(modelCache.get(path))) {
-                model.addMesh(m);
-            }
-            return model;
+    public void loadModel(String path, String id) {
+
+        currentJob = "Loading " + id;
+        if (modelCache.containsKey(id)) {
+            System.err.println("[ModelLoader] Model with ID (" + id + ") is already loaded.");
+           return;
         }
 
         int flags = aiProcess_Triangulate | aiProcess_GenSmoothNormals | aiProcess_JoinIdenticalVertices | aiProcess_OptimizeMeshes | aiProcess_CalcTangentSpace;
@@ -45,7 +46,7 @@ public class ModelLoader {
 
         if (aiScene == null || (aiScene.mFlags() & AI_SCENE_FLAGS_INCOMPLETE) != 0 || aiScene.mRootNode() == null) {
             System.err.println("[ModelLoader] Failed to load '" + path + "': " + aiGetErrorString());
-            return null;
+            return;
         }
 
         int lastSlash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
@@ -58,12 +59,28 @@ public class ModelLoader {
 
         processNode(aiScene.mRootNode(), aiScene, new Matrix4f(), cached);
         aiReleaseImport(aiScene);
-        modelCache.put(path, cached);
+        modelCache.put(id, cached);
+    }
 
-        for (Mesh mesh : instantiate(cached)) {
-            model.addMesh(mesh);
+    public Model getModel(String id) {
+        List<CachedMesh> cached = modelCache.get(id);
+        if (cached == null) {
+            System.err.println("[ModelLoader] Model with ID (" + id + ") was never loaded");
+            return null;
+        }
+        Model model = new Model(engine);
+        model.setID(id);
+
+        for (Mesh m : instantiate(cached)) {
+            model.addMesh(m);
         }
         return model;
+    }
+
+    public List<Model> getLoadedModels() {
+        List<Model> mlist = new ArrayList<>();
+        for (String id : modelCache.keySet()) {mlist.add(getModel(id));}
+        return mlist;
     }
 
     private List<Mesh> instantiate(List<CachedMesh> cached) {
@@ -163,17 +180,20 @@ public class ModelLoader {
         int matIndex = aiMesh.mMaterialIndex();
         if (matIndex >= 0 && aiScene.mMaterials() != null) {
             AIMaterial aiMaterial = AIMaterial.create(aiScene.mMaterials().get(matIndex));
-            List<Mesh.MeshTexture> albedo = loadMaterialTextures(aiMaterial, aiTextureType_BASE_COLOR, "texture_diffuse", aiScene);
-            if (albedo.isEmpty() || albedo == null) albedo = loadMaterialTextures(aiMaterial, aiTextureType_DIFFUSE, "texture_diffuse", aiScene);
-            textures.addAll(albedo);
-            textures.addAll(loadMaterialTextures(aiMaterial, aiTextureType_AMBIENT_OCCLUSION, "texture_ao", aiScene));
-            textures.addAll(loadMaterialTextures(aiMaterial, aiTextureType_DIFFUSE_ROUGHNESS, "texture_roughness", aiScene));
-            textures.addAll(loadMaterialTextures(aiMaterial, aiTextureType_SPECULAR, "texture_specular", aiScene));
-            textures.addAll(loadMaterialTextures(aiMaterial, aiTextureType_EMISSIVE, "texture_emissive", aiScene)); // this was way more important than i thought
-            textures.addAll(loadMaterialTextures(aiMaterial, aiTextureType_METALNESS, "texture_metalness", aiScene));
-            textures.addAll(loadMaterialTextures(aiMaterial, aiTextureType_OPACITY, "texture_opacity", aiScene));
-            List<Mesh.MeshTexture> normalMaps = loadMaterialTextures(aiMaterial, aiTextureType_NORMALS, "texture_normal", aiScene);
-            textures.addAll(normalMaps);
+
+            if (aiGetMaterialTextureCount(aiMaterial, aiTextureType_BASE_COLOR) > 0) {
+                loadMaterialTextures(textures, aiMaterial, aiTextureType_BASE_COLOR, "texture_diffuse", aiScene);
+            } else {
+                loadMaterialTextures(textures, aiMaterial, aiTextureType_DIFFUSE, "texture_diffuse", aiScene);
+            }
+            loadMaterialTextures(textures, aiMaterial, aiTextureType_AMBIENT_OCCLUSION, "texture_ao", aiScene);
+            loadMaterialTextures(textures, aiMaterial, aiTextureType_DIFFUSE_ROUGHNESS, "texture_roughness", aiScene);
+            loadMaterialTextures(textures, aiMaterial, aiTextureType_SPECULAR, "texture_specular", aiScene);
+            loadMaterialTextures(textures, aiMaterial, aiTextureType_EMISSIVE, "texture_emissive", aiScene);
+            loadMaterialTextures(textures, aiMaterial, aiTextureType_METALNESS, "texture_metalness", aiScene);
+            loadMaterialTextures(textures, aiMaterial, aiTextureType_OPACITY, "texture_opacity", aiScene);
+            loadMaterialTextures(textures, aiMaterial, aiTextureType_NORMALS, "texture_normal", aiScene);
+
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 AIColor4D color = AIColor4D.malloc(stack);
                 if (aiGetMaterialColor(aiMaterial, AI_MATKEY_COLOR_AMBIENT, aiTextureType_NONE, 0, color) == aiReturn_SUCCESS) {
@@ -203,23 +223,21 @@ public class ModelLoader {
 
             }
         }
-        if (engine.getWorld().getCurrentScene().getName().equals("testscene")) {
-            System.out.println("[Mesh] ambient=" + ambient + " diffuse=" + diffuse +
-                    " emissive=" + emissive + " emFactor=" + emissiveFactor +
-                    " shininess=" + shininess + " texCount=" + textures.size());
-
+       /* if (engine.getWorld().getCurrentScene().getName().equals("testscene")) {
+            System.out.println("[Mesh] ambient=" + ambient + " diffuse=" + diffuse +" emissive=" + emissive + " emFactor=" + emissiveFactor +" shininess=" + shininess + " texCount=" + textures.size());
             for (Mesh.MeshTexture t : textures) {
                 System.out.println("  tex: " + t.type + " -> " + t.path);
             }
-        }
+        }*/
 
 
-        MeshData data = new MeshData(positions, normals, uvs, indices);
+        MeshData data = ThreadManager.MainThread.submit(() -> new MeshData(positions, normals, uvs, indices));
         return new CachedMesh(data, textures, nodeTransform, ambient, diffuse, specular, emissive, shininess, emissiveFactor);
     }
 
-    private List<Mesh.MeshTexture> loadMaterialTextures(AIMaterial material, int texType, String typeName, AIScene aiScene) {
-        List<Mesh.MeshTexture> textures = new ArrayList<>();
+    private void loadMaterialTextures(List<Mesh.MeshTexture> out, AIMaterial material, int texType, String typeName, AIScene aiScene) {
+        AtomicInteger pending = new AtomicInteger(0); // this is to count current main thread calls that arent done yet
+
         int count = aiGetMaterialTextureCount(material, texType);
 
         for (int i = 0; i < count; i++) {
@@ -233,71 +251,86 @@ public class ModelLoader {
             long sceneId = aiScene.address();
             if (relativePath.startsWith("*")) {
                 int texIndex = Integer.parseInt(relativePath.substring(1));
-                String cacheKey = sceneId +  "__embedded__" + texIndex;
+                String cacheKey = sceneId + "__embedded__" + texIndex;
                 if (textureCache.containsKey(cacheKey)) {
-                    textures.add(textureCache.get(cacheKey));
+                    out.add(textureCache.get(cacheKey));
                 } else {
-                    int glId = uploadEmbeddedTexture(aiScene, texIndex);
-                    if (glId != -1) {
-                        Mesh.MeshTexture tex = new Mesh.MeshTexture(glId, typeName, cacheKey);
-                        textures.add(tex);
-                        textureCache.put(cacheKey, tex);
+                    int[] w = new int[1], h = new int[1];
+                    ByteBuffer pixels = extractEmbeddedPixels(aiScene, texIndex, w, h);
+                    if (pixels != null) {
+                        int width = w[0], height = h[0];
+                        pending.incrementAndGet();
+                        ThreadManager.MainThread.run(() -> {
+                            int glId = uploadPixels(pixels, width, height);
+                            if (glId != -1) {
+                                Mesh.MeshTexture tex = new Mesh.MeshTexture(glId, typeName, cacheKey);
+                                out.add(tex);
+                                textureCache.put(cacheKey, tex);
+                            }
+                            pending.decrementAndGet();
+                        });
                     }
                 }
                 continue;
             }
 
             if (textureCache.containsKey(fullPath)) {
-                textures.add(textureCache.get(fullPath));
+                out.add(textureCache.get(fullPath));
             } else {
-                int glId = uploadTexture(fullPath);
-                if (glId != -1) {
-                    Mesh.MeshTexture tex = new Mesh.MeshTexture(glId, typeName, fullPath);
-                    textures.add(tex);
-                    textureCache.put(fullPath, tex);
-                }
+                pending.incrementAndGet();
+                ThreadManager.MainThread.run(() -> {
+                    int glId = uploadTexture(fullPath);
+                    if (glId != -1) {
+                        Mesh.MeshTexture tex = new Mesh.MeshTexture(glId, typeName, fullPath);
+                        out.add(tex);
+                        textureCache.put(fullPath, tex);
+                    }
+                    pending.decrementAndGet();
+                });
             }
         }
-        return textures;
+        while (pending.get() != 0) {
+            Thread.yield();
+        }
     }
 
-    private int uploadEmbeddedTexture(AIScene aiScene, int index) {
+
+
+    private ByteBuffer extractEmbeddedPixels(AIScene aiScene, int index, int[] w, int[] h) {
         AITexture aiTex = AITexture.create(aiScene.mTextures().get(index));
-        int[] w = new int[1], h = new int[1], ch = new int[1];
+        int[] ch = new int[1];
         stbi_set_flip_vertically_on_load(false);
 
-        ByteBuffer data;
-        boolean compressed = aiTex.mHeight() == 0;
-        if (compressed) {
-            data = stbi_load_from_memory(aiTex.pcDataCompressed(), w, h, ch, 4);
+        if (aiTex.mHeight() == 0) {
+            ByteBuffer decoded = stbi_load_from_memory(aiTex.pcDataCompressed(), w, h, ch, 4);
+            if (decoded == null) {
+                System.err.println("[ModelLoader] Failed to decode embedded texture " + index + ": " + stbi_failure_reason());
+            }
+            return decoded;
         } else {
             w[0] = aiTex.mWidth();
             h[0] = aiTex.mHeight();
             AITexel.Buffer texels = aiTex.pcData();
-            data = org.lwjgl.BufferUtils.createByteBuffer(w[0] * h[0] * 4);
+            ByteBuffer data = org.lwjgl.BufferUtils.createByteBuffer(w[0] * h[0] * 4);
             for (int i = 0; i < w[0] * h[0]; i++) {
                 AITexel t = texels.get(i);
                 data.put(t.r()).put(t.g()).put(t.b()).put(t.a());
             }
             data.flip();
+            return data;
         }
+    }
 
-        if (data == null) {
-            System.err.println("[ModelLoader] Failed to decode embedded texture " + index + ": " + stbi_failure_reason());
-            return -1;
-        }
-
+    private int uploadPixels(ByteBuffer data, int width, int height) {
         int id = glGenTextures();
         glBindTexture(GL_TEXTURE_2D, id);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w[0], h[0], 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
         glGenerateMipmap(GL_TEXTURE_2D);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glBindTexture(GL_TEXTURE_2D, 0);
-
-        if (compressed) stbi_image_free(data);
         return id;
     }
 
@@ -323,4 +356,8 @@ public class ModelLoader {
         stbi_image_free(image);
         return id;
     }
+
+    public String getCurrentJob() {return currentJob;}
+
+
 }

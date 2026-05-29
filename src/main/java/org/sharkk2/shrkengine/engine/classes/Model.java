@@ -1,31 +1,30 @@
 package org.sharkk2.shrkengine.engine.classes;
 
-import com.sun.source.tree.ForLoopTree;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
 import org.sharkk2.shrkengine.engine.Engine;
-import org.sharkk2.shrkengine.engine.ShaderLoader;
 import org.sharkk2.shrkengine.engine.entities.Mesh;
-import org.sharkk2.shrkengine.engine.entities.debug.AABBEntity;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Vector;
-import java.util.concurrent.atomic.AtomicInteger;
 
-public class Model extends Entity3D { // well it's not rlly an object even though it looks like one
+public class Model extends WorldEntity { // well it's not rlly an object even though it looks like one
     private final List<Mesh> meshes = new ArrayList<>();
-    private Entity3D.AABB cachedAABB;
+    private WorldEntity.AABB cachedAABB;
+
 
     public Model(Engine engine) {
         super(engine);
+        entityType = EntityType.MODEL;
+
     }
 
     public void addMesh(Mesh mesh) {
         meshes.add(mesh);
         mesh.setParent(this);
     }
+
 
     @Override
     public AABB getAABB() {
@@ -100,7 +99,7 @@ public class Model extends Entity3D { // well it's not rlly an object even thoug
     }
 
     @Override
-    public boolean doRender() { // useless the renderer takes care of individual meshes anyway
+    public boolean doRender() {
         boolean result = true;
         for (Mesh mesh : meshes) result &= mesh.render();
         return result;
@@ -116,14 +115,15 @@ public class Model extends Entity3D { // well it's not rlly an object even thoug
         this.x = x;
         this.y = y;
         this.z = z;
-        if (Float.isNaN(ogX)) {this.ogX = x; this.ogY = y; this.ogZ = z;}
+        if (originalPosition == null) originalPosition = new Vector3f(x, y, z);
+
         for (Mesh mesh : meshes) {
-            engine.getWorld().getCurrentScene().worldPosMap.remove(this.x +":"+this.y+":"+this.z);
             mesh.setPosition(x,y,z);
-            if (Float.isNaN(ogX)) {mesh.ogX = x; mesh.ogY = y; mesh.ogZ = z;}
+
+            if (originalPosition == null) mesh.originalPosition = new Vector3f(x, y, z);
             if (mesh.light != null) {mesh.light.position = new Vector3f(x,y,z);}
-            engine.getWorld().getCurrentScene().worldPosMap.put(this.x +":"+this.y+":"+this.z, mesh);
         }
+        registerEvent(EntityEvent.POSITION_CHANGE);
     }
 
 
@@ -134,16 +134,30 @@ public class Model extends Entity3D { // well it's not rlly an object even thoug
         this.h = h;
         this.d = d;
         for (Mesh mesh : meshes) {mesh.setSize(w,h,d);}
+        registerEvent(EntityEvent.SIZE_CHANGE);
     }
+
+
 
     @Override
     public void setRotation(float angleX, float angleY, float angleZ) {
-        cachedAABB = null;
-        this.angleX = angleX;
-        this.angleY = angleY;
-        this.angleZ = angleZ;
+        rotation.identity()
+                .rotateY((float) Math.toRadians(angleY))
+                .rotateX((float) Math.toRadians(angleX))
+                .rotateZ((float) Math.toRadians(angleZ));
         for (Mesh mesh : meshes) {mesh.setRotation(angleX, angleY, angleZ);}
-        cachedAABB = null;
+        registerEvent(EntityEvent.ROTATION_CHANGE);
+
+    }
+
+    @Override
+    public void rotate(float dx, float dy, float dz) {
+        rotation.rotateY((float) Math.toRadians(dy))
+                .rotateX((float) Math.toRadians(dx))
+                .rotateZ((float) Math.toRadians(dz));
+        for (Mesh mesh : meshes) {mesh.rotate(dx, dy, dz);}
+        eulerDirty = true;
+        registerEvent(EntityEvent.ROTATION_CHANGE);
     }
 
     @Override
@@ -171,11 +185,26 @@ public class Model extends Entity3D { // well it's not rlly an object even thoug
     }
 
     @Override
-    public void setDebug(int stage) {
-        if (stage < 0 || stage > 4) return;
-        this.debugStage = stage;
-        for (Mesh mesh : meshes) {mesh.setDebug(stage);}
+    public void addDebugFlag(int flag) {
+        if (debugFlags.contains(flag)) return;
+        debugFlags.add(flag);
+        if (flag != DEBUG_STAGE_OBB) {
+            for (Mesh mesh : meshes) {mesh.addDebugFlag(flag);}
+        }
     }
+
+    @Override
+    public void removeDebugFlag(int flag) {
+        debugFlags.remove((Integer) flag);
+        for (Mesh mesh : meshes) {mesh.removeDebugFlag(flag);}
+    }
+
+    @Override
+    public void clearDebugFlags() {
+        debugFlags.clear();
+        for (Mesh mesh : meshes) {mesh.clearDebugFlags();}
+    }
+
 
     public void setChildrenID(String id) {for (Mesh mesh : meshes) {mesh.setID(id);}}
     public List<Mesh> getChildren() {return meshes;}
@@ -187,19 +216,12 @@ public class Model extends Entity3D { // well it's not rlly an object even thoug
     public Vector4f getColorRGBA() {return new Vector4f(r,g,b,a);}
     public Vector3f getColorRGB() {return new Vector3f(r,g,b);}
     public boolean isVisible() {return visible;}
-    public Vector3f getRotation(boolean radians) {
-        if (radians) return new Vector3f((float)Math.toRadians(angleX), (float)Math.toRadians(angleY), (float)Math.toRadians(angleZ));
-        else return new Vector3f(angleX, angleY, angleZ);
-    }
+
 
     @Override
-    public void handleInput(Runnable action) {
-        if (action != null) action.run();
-    }
-
-    @Override
-    public void update(Runnable action) {
-        if (action != null) action.run();
+    public void update() {
+        syncMaterials();
+        if (updateScript != null) updateScript.run();
     }
 
     @Override
@@ -207,5 +229,19 @@ public class Model extends Entity3D { // well it's not rlly an object even thoug
 
     @Override
     protected void onDestroy() {}
+
+    private void syncMaterials() {
+        for (Mesh mesh : meshes) {
+           /* mesh.material.setAmbient(material.ambient);
+            mesh.material.setDiffuse(material.diffuse);
+            mesh.material.setSpecular(material.specular);
+            mesh.material.setEmissive(material.emissive);
+            mesh.material.setEmissiveStrength(material.emissiveStrength);
+            mesh.material.setShininess(materwial.shininess);
+            mesh.material.setRainbowEffect(material.rainbowEffect);*/
+            mesh.material.applyLight(material.applyLight);
+            mesh.setTransparency(getColorRGBA().w);
+        }
+    }
 
 }

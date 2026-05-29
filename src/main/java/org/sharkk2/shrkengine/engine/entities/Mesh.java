@@ -7,7 +7,7 @@ import org.sharkk2.shrkengine.engine.Camera;
 import org.sharkk2.shrkengine.engine.Engine;
 import org.sharkk2.shrkengine.engine.LightManager;
 import org.sharkk2.shrkengine.engine.ShaderLoader;
-import org.sharkk2.shrkengine.engine.classes.Entity3D;
+import org.sharkk2.shrkengine.engine.classes.WorldEntity;
 import org.sharkk2.shrkengine.engine.classes.MeshData;
 import org.sharkk2.shrkengine.engine.classes.Model;
 import org.sharkk2.shrkengine.engine.classes.Scene;
@@ -15,9 +15,9 @@ import org.sharkk2.shrkengine.engine.classes.Scene;
 import java.util.List;
 
 import static org.lwjgl.glfw.GLFW.glfwGetTime;
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL43.*;
 
-public class Mesh extends Entity3D {
+public class Mesh extends WorldEntity {
     public static class MeshTexture {
         public final int id;
         public final String type;
@@ -34,16 +34,25 @@ public class Mesh extends Entity3D {
     private final List<MeshTexture> textures;
     private final Matrix4f nodeTransform;
     private final Camera camera;
+    private final LightManager lightManager;
     public final boolean ownsData;
     private Model parent;
-    private Entity3D.OBB cachedOBB;
+    private final Vector4f matPropsBuffer = new Vector4f();
+    private final Matrix4f projMatrix;
+    private final Matrix4f viewMatrix;
+    private WorldEntity.OBB cachedOBB;
 
 
 
 
     public Mesh(Engine engine, MeshData meshData, List<MeshTexture> textures, Matrix4f nodeTransform, boolean ownsData) {
         super(engine);
+        entityType = EntityType.MESH;
+
         this.camera = engine.getCamera();
+        this.lightManager = engine.getLightManager();
+        projMatrix = camera.getProjectionMatrix();
+        viewMatrix = camera.getViewMatrix();
         this.textures = textures;
         this.meshData = meshData;
         this.nodeTransform = nodeTransform;
@@ -52,10 +61,7 @@ public class Mesh extends Entity3D {
 
         model = new Matrix4f()
                 .translate(x, y, z)
-                .rotateXYZ(
-                        (float) Math.toRadians(angleX),
-                        (float) Math.toRadians(angleY),
-                        (float) Math.toRadians(angleZ))
+                .rotate(rotation)
                 .scale(w, h, d)
                 .mul(nodeTransform);
         computeBounds(meshData.positions);
@@ -71,46 +77,31 @@ public class Mesh extends Entity3D {
         shader.use();
         glBindVertexArray(meshData.vao);
 
-        Matrix4f projection = camera.getProjectionMatrix();
-        Matrix4f view = camera.getViewMatrix();
+        camera.getViewMatrix(viewMatrix);
+        camera.getProjectionMatrix(projMatrix);
 
         if (!alive) return false;
         if (!visible) return false;
 
         shader.setMat4("model", model);
-        shader.setMat4("projection", projection);
-        shader.setMat4("view", view);
+        shader.setMat4("projection", projMatrix);
+        shader.setMat4("view", viewMatrix);
         shader.setVec4("color", getColorRGBA());
         shader.setInt("useInstancing", 0);
         shader.setFloat("utime", (float) glfwGetTime());
         shader.setInt("useColorMask", 0);
-        shader.setInt("numPointLights", engine.getLightManager().getPointLights().size());
-        shader.setVec3("cameraPos", camera.getPosition());
+        shader.setInt("atlasSize", 1);
+        shader.setInt("textureIndex", 0);
+        shader.setFloat("textureScale", -1);
         shader.setVec3("material.ambient", material.ambient);
         shader.setVec3("material.diffuse", material.diffuse);
         shader.setVec3("material.specular", material.specular);
         shader.setVec3("material.emissive", material.emissive);
-        shader.setVec4("material.matProps", new Vector4f(material.shininess, material.applyLight?1:0, material.rainbowEffect?1:0, material.emissiveStrength));
+        matPropsBuffer.set(material.shininess, material.applyLight?1:0, material.rainbowEffect?1:0, material.emissiveStrength);
+        shader.setVec4("material.matProps", matPropsBuffer);
 
         Scene currentScene = engine.getWorld().getCurrentScene();
-        shader.setVec3("dirLight.direction", currentScene.globalSceneLight.direction);
-        shader.setVec3("dirLight.color", currentScene.globalSceneLight.color);
-        shader.setVec3("dirLight.ambient", currentScene.globalSceneLight.ambient);
-        shader.setInt("dirLight.enabled", currentScene.globalSceneLight.enabled ? 1 : 0);
-        shader.setInt("dirLight.passShadow", currentScene.globalSceneLight.castShadow ? 1 : 0);
-        shader.setVec3("fog.color", currentScene.sceneFog.color);
-        shader.setFloat("fog.start", currentScene.sceneFog.start);
-        shader.setFloat("fog.end", currentScene.sceneFog.end);
-        shader.setFloat("fog.density", currentScene.sceneFog.density);
-        shader.setInt("fog.mode", currentScene.sceneFog.mode);
-
-        for (int i = 0; i < engine.getLightManager().getPointLights().size(); i++) {
-            LightManager.PointLight light = engine.getLightManager().getPointLights().get(i);
-            shader.setVec3("pointLights[" + i + "].position", light.position);
-            shader.setVec3("pointLights[" + i + "].color", light.color);
-            shader.setFloat("pointLights[" + i + "].range", light.lightRange);
-            shader.setFloat("pointLights[" + i + "].intensity", light.intensity);
-        }
+        engine.getRenderer().uploadLightData(shader);
 
         boolean hasDiffuse = false;
         boolean hasSpecular = false;
@@ -119,44 +110,60 @@ public class Mesh extends Entity3D {
         boolean hasMetalness = false;
         boolean hasRoughness = false;
         boolean hasOpacity = false;
+        boolean hasEmissive = false;
         int firstTexid = GL_TEXTURE0;
+        int unit = 0;
         for (Mesh.MeshTexture tex : getTextures()) {
             if (tex.type.equals("texture_diffuse") && !hasDiffuse) {
-                glActiveTexture(firstTexid);
+                glActiveTexture(firstTexid + unit);
                 glBindTexture(GL_TEXTURE_2D, tex.id);
-                shader.setInt("texSampler", 0);
+                shader.setInt("texSampler", unit);
+                unit++;
                 hasDiffuse = true;
             } else if (tex.type.equals("texture_specular") && !hasSpecular) {
-                glActiveTexture(firstTexid + 1);
+                glActiveTexture(firstTexid + unit);
                 glBindTexture(GL_TEXTURE_2D, tex.id);
-                shader.setInt("specularMap", 1);
+                shader.setInt("specularMap", unit);
+                unit++;
                 hasSpecular = true;
             }else if (tex.type.equals("texture_normal") && !hasNormal) {
-                glActiveTexture(firstTexid + 2);
+                glActiveTexture(firstTexid + unit);
                 glBindTexture(GL_TEXTURE_2D, tex.id);
-                shader.setInt("normalMap", 2);
+                shader.setInt("normalMap", unit);
+                unit++;
                 hasNormal = true;
             } else if (tex.type.equals("texture_ao") && !hasAO) {
-                glActiveTexture(firstTexid + 3);
+                glActiveTexture(firstTexid + unit);
                 glBindTexture(GL_TEXTURE_2D, tex.id);
-                shader.setInt("aoMap", 3);
+                shader.setInt("aoMap", unit);
+                unit++;
                 hasAO = true;
             } else if (tex.type.equals("texture_roughness") && !hasRoughness) {
-                glActiveTexture(firstTexid + 4);
+                glActiveTexture(firstTexid + unit);
                 glBindTexture(GL_TEXTURE_2D, tex.id);
-                shader.setInt("roughnessMap", 4);
+                shader.setInt("roughnessMap", unit);
+                unit++;
                 hasRoughness = true;
             } else if (tex.type.equals("texture_metalness") && !hasMetalness) {
-                glActiveTexture(firstTexid + 5);
+                glActiveTexture(firstTexid + unit);
                 glBindTexture(GL_TEXTURE_2D, tex.id);
-                shader.setInt("metalnessMap", 5);
+                shader.setInt("metalnessMap", unit);
+                unit++;
                 hasMetalness = true;
             } else if (tex.type.equals("texture_opacity") && !hasOpacity) {
-                glActiveTexture(firstTexid + 6);
+                glActiveTexture(firstTexid + unit);
                 glBindTexture(GL_TEXTURE_2D, tex.id);
-                shader.setInt("opacityMap", 6);
+                shader.setInt("opacityMap", unit);
+                unit++;
                 hasOpacity = true;
+            }  else if (tex.type.equals("texture_emissive") && !hasEmissive) {
+                glActiveTexture(firstTexid + unit);
+                glBindTexture(GL_TEXTURE_2D, tex.id);
+                shader.setInt("emissiveMap", unit);
+                unit++;
+                hasEmissive = true;
             }
+
         }
         shader.setInt("useTexture", hasDiffuse ? 1 : 0);
         shader.setInt("useSpecularMap", hasSpecular ? 1 : 0);
@@ -165,29 +172,23 @@ public class Mesh extends Entity3D {
         shader.setInt("useOpacityMap", hasOpacity ? 1:0);
         shader.setInt("useRoughnessMap", hasRoughness ? 1:0);
         shader.setInt("useMetalMap", hasMetalness ? 1:0);
+        shader.setInt("useEmissiveMap", hasEmissive ?1:0);
 
-        glActiveTexture(firstTexid + 7);
-        glBindTexture(GL_TEXTURE_2D, currentScene.globalSceneLight.shadowMap.depthTexture);
-        shader.setInt("shadowMap", 7);
+
+        glActiveTexture(GL_TEXTURE20);
+        glBindTexture(GL_TEXTURE_2D, lightManager.shadowMap.depthTexture);
+        shader.setInt("shadowMap", 20);
         shader.setMat4("lightSpaceMatrix", currentScene.globalSceneLight.getLightSpace(engine));
+        engine.getRenderer().uploadSceneData(shader, currentScene);
 
-        engine.onEntity3DRender(this);
+        engine.onWorldEntityRender(this);
 
         glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
         return true;
     }
 
-    @Override
-    public void handleInput(Runnable action) {
-        if (action != null) action.run();
-    }
 
-    @Override
-    public void update(Runnable action) {
-        if (action != null) action.run();
-
-    }
 
     @Override
     public void applyTexture(int texNum) {}
